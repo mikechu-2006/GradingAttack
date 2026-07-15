@@ -1,0 +1,9 @@
+logs/
+logs_defense/
+result/
+result_defense/
+__pycache__/
+*.pyc
+models/
+.env
+*.log
