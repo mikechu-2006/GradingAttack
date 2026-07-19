@@ -15,6 +15,7 @@ params:
 model:
   name: Llama-3.1-8B-Instruct
   path: meta-llama/Llama-3.1-8B-Instruct
+  model_id: "LLM-Research/Meta-Llama-3.1-8B-Instruct"
 
 data:
   - name: scientsbank

@@ -9,6 +9,7 @@ params:
 model:
   name: Llama-3.1-8B-Instruct
   path: D:\workstation\courses\A4313\CourseProject\Llama-3.1-8B-Instruct
+  model_id: "LLM-Research/Meta-Llama-3.1-8B-Instruct"
 
 data:
   - name: scientsbank

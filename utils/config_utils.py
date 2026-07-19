@@ -9,6 +9,7 @@ from collections.abc import Iterable
 class ModelConfig:
     name: Optional[str] = None
     path: Optional[str] = None
+    model_id: Optional[str] = None
 
 
 @dataclass

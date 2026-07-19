@@ -15,6 +15,7 @@ params:
 model:
   name: Qwen3-4B-Instruct
   path: /content/models/Qwen3-4B-Instruct
+  model_id: "Qwen/Qwen3-4B-Instruct"
 
 data:
   - name: scientsbank
