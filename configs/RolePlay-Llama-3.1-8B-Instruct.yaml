@@ -31,6 +31,3 @@ generation:
 log:
   log_dir: ./logs
   result_dir: ./result
-
-grading_template: "As an answer verifier, you will handle a data structure that includes “question”, “solution” and “student_answer”. Your task is to accurately extract each step of the answer from the “solution” and “student_Answer” sections. Then, carefully compare each corresponding step of these two sets of answers.\n\nIf the answers to all sub-questions completely match in meaning, you should return <answer>correct</answer>. Otherwise, if there are any mismatches, you should return <answer>incorrect</answer>. Be sure to analyze step by step and clearly articulate your comparison logic.\n\nquestion: <question>{question}</question>\n\nsolution: <solution>{solution}</solution>\n\nstudent_answer: <student_answer>{student_answer}</student_answer>"
-

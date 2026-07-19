@@ -41,4 +41,8 @@ class GradingAttackLogger:
     def result(self, r: Dict):
         with open(self.result_path, "a", encoding="utf-8") as resule_file:
             resule_file.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    @property
+    def metrics_path(self):
+        return self.result_path.replace(".jsonl", "_metrics.json")
     

@@ -7,3 +7,5 @@ __pycache__/
 models/
 .env
 *.log
+test_cpu_inference.py
+.vscode/settings.json

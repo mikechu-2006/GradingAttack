@@ -56,11 +56,15 @@ class GradingAttack:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
+            device = self.config.params.get("device") or (
+                "cuda" if torch.cuda.is_available() else "cpu"
+            )
+            print(f"[grading_attack] Using device: {device}, dtype: bfloat16", flush=True)
             model = AutoModelForCausalLM.from_pretrained(
                 self.config.model_config.path,
                 trust_remote_code=True,
                 torch_dtype=torch.bfloat16,
-            ).to(self.config.params.get("device", "cuda"))
+            ).to(device)
             tokenizer = AutoTokenizer.from_pretrained(
                 self.config.model_config.path,
                 trust_remote_code=True,

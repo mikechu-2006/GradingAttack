@@ -11,6 +11,7 @@ Attack-Defense 联合评估 Pipeline。
 """
 
 import torch
+import random
 from typing import List, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -35,7 +36,9 @@ class GradingDefensePipeline:
         self.model = model
         self.tokenizer = tokenizer
         self.defenses = defenses or []
-        self.device = config.params.get("device", "cuda")
+        self.device = config.params.get("device") or (
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
 
         # 检查是否有 SmoothLLM 类需要多次推理的防御
         self.multi_gen_defenses = [d for d in self.defenses
@@ -60,6 +63,9 @@ class GradingDefensePipeline:
 
         for data_config in config.data_config:
             data_list = read_student_qa_data_from_jsonl(data_config.path)
+            if data_config.max_samples and data_config.max_samples < len(data_list):
+                rng = random.Random(data_config.random_seed)
+                data_list = rng.sample(data_list, data_config.max_samples)
             all_results = []
 
             for data in data_list:
@@ -157,12 +163,30 @@ class GradingDefensePipeline:
                 metrics: EvalMetrics = compute_metrics(flat_results)
                 logger.info(
                     f"[{config.model_config.name}] [{data_config.name}] "
-                    f"A_before={metrics.accuracy_before:.4f} "
+                    f"QWK_clean={metrics.qwk_clean:.4f} "
+                    f"QWK_attack={metrics.qwk_attack:.4f} "
                     f"ASR={metrics.asr:.4f} "
                     f"ASR_defended={metrics.asr_defended:.4f} "
                     f"CAS={metrics.cas:.4f} "
                     f"CAS_defended={metrics.cas_defended:.4f}"
                 )
+
+                # ── Step 6: 保存指标 + 配置摘要 ──
+                import json
+                summary = metrics.to_dict()
+                summary["config"] = {
+                    "name": config.name,
+                    "attack_method": config.attack_method,
+                    "model": config.model_config.name,
+                    "model_path": config.model_config.path,
+                    "template": config.template if hasattr(config, "template") else "ci",
+                    "datasets": [d.name for d in config.data_config],
+                    "defenses": [d.__class__.__name__ for d in self.defenses],
+                    "params": config.params,
+                }
+                with open(logger.metrics_path, "w", encoding="utf-8") as f:
+                    json.dump(summary, f, indent=2, ensure_ascii=False)
+                logger.info(f"Metrics saved to {logger.metrics_path}")
 
             logger.info(
                 f"[MODEL] {config.model_config.name}  "
@@ -174,12 +198,14 @@ class GradingDefensePipeline:
         inputs = self.tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, return_tensors="pt"
         ).to(self.device)
+        print(f"[pipeline] Generating {self.config.generation_config.max_tokens} tokens on {self.device}...", flush=True)
         outputs = self.model.generate(
             inputs,
             do_sample=False,
             max_new_tokens=self.config.generation_config.max_tokens,
             temperature=self.config.generation_config.temperature,
         )
+        print(f"[pipeline] Done. Generated {outputs.shape[1] - inputs.shape[1]} tokens.", flush=True)
         return self.tokenizer.batch_decode(
             outputs[:, inputs.shape[1]:], skip_special_tokens=True
         )[0]

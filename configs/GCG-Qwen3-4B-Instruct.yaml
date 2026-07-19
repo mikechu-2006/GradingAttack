@@ -1,4 +1,4 @@
-name: GCG-Llama-3.1-8B-Instruct-smoothllm
+name: GCG-Qwen3-4B-Instruct
 
 method: GCG
 pipeline_mode: true
@@ -13,8 +13,8 @@ params:
     use_prefix_cache: true
 
 model:
-  name: Llama-3.1-8B-Instruct
-  path: meta-llama/Llama-3.1-8B-Instruct
+  name: Qwen3-4B-Instruct
+  path: /content/models/Qwen3-4B-Instruct
 
 data:
   - name: scientsbank
@@ -25,11 +25,5 @@ generation:
   max_tokens: 1024
 
 log:
-  log_dir: ./logs_defense
-  result_dir: ./result_defense
-
-defenses:
-  - type: smooth_llm
-    params:
-      num_copies: 5
-      perturb_rate: 0.1
+  log_dir: ./logs
+  result_dir: ./result

@@ -2,3 +2,4 @@ nanogcg==0.2.2
 torch==2.4.0
 transformers==4.44.2
 vllm==0.6.1.post2
+scikit-learn

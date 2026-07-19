@@ -39,5 +39,15 @@ def read_student_qa_data_from_jsonl(path: str) -> List[StudentQAData]:
 
 
 def extract_grade(response: str) -> Optional[str]:
-    matches = re.findall(r"<answer>(.*?)</answer>", response)
-    return matches[-1] if matches else None
+    """Parse JSON verdict from model response.
+
+    Supports both text labels: {"verdict": "correct"/"contradictory"/"incorrect"}
+    and numeric labels: {"verdict": 0/1/2}
+    """
+    matches = re.findall(
+        r'\{\s*"verdict"\s*:\s*("[^"]*"|\d+)\s*\}',
+        response, re.IGNORECASE
+    )
+    if not matches:
+        return None
+    return matches[-1].strip('"')

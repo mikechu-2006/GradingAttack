@@ -1,7 +1,7 @@
 import os
 import yaml
 from typing import Optional, Dict, List
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from collections.abc import Iterable
 
 
@@ -15,6 +15,8 @@ class ModelConfig:
 class DataConfig:
     name: Optional[str] = None
     path: Optional[str] = None
+    max_samples: Optional[int] = None
+    random_seed: Optional[int] = None
 
 
 @dataclass
@@ -47,8 +49,8 @@ class AttackConfig:
     name: Optional[str] = None
     model_config: Optional[ModelConfig] = None
     data_config: Optional[List[DataConfig]] = None
-    generation_config: GenerationConfig = GenerationConfig()
-    log_config: LogConfig = LogConfig()
+    generation_config: GenerationConfig = field(default_factory=GenerationConfig)
+    log_config: LogConfig = field(default_factory=LogConfig)
     attack_method: str = "GCG"
     params: Optional[Dict] = None
     grading_template: Optional[str] = None
@@ -89,7 +91,15 @@ def parse_config(path: str) -> AttackConfig:
     
     generation_config = GenerationConfig(**config_dict["generation"])
     attack_method = config_dict["method"]
-    grading_template = config_dict["grading_template"]
+    grading_template = config_dict.get("grading_template")
+    if grading_template is None:
+        template_name = config_dict.get("template", "ci")
+        template_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "configs", f"grading_template_{template_name}.txt"
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            grading_template = f.read()
 
 
     defenses = None

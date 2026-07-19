@@ -39,8 +39,19 @@ def load_jsonl(path: str) -> list[dict]:
 
 
 def extract_grade(response: str) -> str | None:
-    matches = re.findall(r"<answer>(.*?)</answer>", response)
-    return matches[-1].strip().lower() if matches else None
+    """Parse JSON verdict from model response.
+
+    Supports both text labels: {"verdict": "correct"/"contradictory"/"incorrect"}
+    and numeric labels: {"verdict": 0/1/2}
+    """
+    import re as _re
+    matches = _re.findall(
+        r'\{\s*"verdict"\s*:\s*("[^"]*"|\d+)\s*\}',
+        response, _re.IGNORECASE
+    )
+    if not matches:
+        return None
+    return matches[-1].strip('"')
 
 
 def compute_metrics(results: list[dict]) -> dict:
@@ -138,6 +149,12 @@ def run_baseline(model_path: str, data_path: str, device: str = "cuda",
         )[0]
 
         pred = extract_grade(response)
+        # Normalize 3-class to binary: correct/0 -> correct, everything else -> incorrect
+        if pred is not None:
+            if pred in ("correct", "0"):
+                pred = "correct"
+            else:
+                pred = "incorrect"
         label = item.get("verification", "").strip().lower()
 
         results.append({
