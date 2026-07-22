@@ -115,36 +115,45 @@ class GradingDefensePipeline:
                 rejected = False
 
                 if self.defenses:
+                    hook_removers = []
+                    for d in self.defenses:
+                        if d.requires_model_hooks():
+                            hook_removers.extend(d.install_model_hooks(self.model))
+
                     try:
-                        # 对有多次推理需求的 defense 做批量扰动+投票
-                        if self.multi_gen_defenses:
-                            defended_original_resp = self._generate_with_voting(
-                                [{"role": "user", "content": prompt}]
-                            )
-                            defended_attacked_resp = self._generate_with_voting(
-                                attacked_messages
-                            )
-                        else:
-                            # pre_process 单次
-                            defended_prompt = prompt
+                        try:
+                            # 对有多次推理需求的 defense 做批量扰动+投票
+                            if self.multi_gen_defenses:
+                                defended_original_resp = self._generate_with_voting(
+                                    [{"role": "user", "content": prompt}]
+                                )
+                                defended_attacked_resp = self._generate_with_voting(
+                                    attacked_messages
+                                )
+                            else:
+                                # pre_process 单次
+                                defended_prompt = prompt
+                                for d in self.defenses:
+                                    defended_prompt = d.pre_process(defended_prompt)
+
+                                defended_original_resp = self._generate(
+                                    [{"role": "user", "content": defended_prompt}]
+                                )
+                                defended_attacked_resp = self._generate(
+                                    [{"role": "user", "content": defended_prompt
+                                      + (attacked_messages[0]["content"][len(prompt):])}]
+                                )
+
+                            # post_process
                             for d in self.defenses:
-                                defended_prompt = d.pre_process(defended_prompt)
+                                defended_original_resp = d.post_process(defended_original_resp or "")
+                                defended_attacked_resp = d.post_process(defended_attacked_resp or "")
 
-                            defended_original_resp = self._generate(
-                                [{"role": "user", "content": defended_prompt}]
-                            )
-                            defended_attacked_resp = self._generate(
-                                [{"role": "user", "content": defended_prompt
-                                  + (attacked_messages[0]["content"][len(prompt):])}]
-                            )
-
-                        # post_process
-                        for d in self.defenses:
-                            defended_original_resp = d.post_process(defended_original_resp or "")
-                            defended_attacked_resp = d.post_process(defended_attacked_resp or "")
-
-                    except DefenseRejectException:
-                        rejected = True
+                        except DefenseRejectException:
+                            rejected = True
+                    finally:
+                        for remove in hook_removers:
+                            remove()
 
                 # ── Step 4: 记录结果 ──
                 result = AttackResult(
