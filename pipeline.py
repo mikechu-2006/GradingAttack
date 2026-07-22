@@ -64,13 +64,16 @@ class GradingDefensePipeline:
             print_config_summary(config)
         logger = GradingAttackLogger(config)
 
+        model_path = _resolve_model_path(config)
+
         # 如果未传入 model，在此加载 (RolePlay 用 vLLM 则不需)
         if self.model is None:
-            model_path = _resolve_model_path(config)
+            load_kwargs = dict(trust_remote_code=True, torch_dtype=torch.bfloat16)
+            if any(d.requires_model_hooks() for d in self.defenses):
+                load_kwargs["attn_implementation"] = "eager"
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path,
-                trust_remote_code=True,
-                torch_dtype=torch.bfloat16,
+                **load_kwargs,
             ).to(self.device)
         if self.tokenizer is None:
             self.tokenizer = AutoTokenizer.from_pretrained(

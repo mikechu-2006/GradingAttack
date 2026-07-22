@@ -7,4 +7,4 @@
 #SBATCH -D ~/GradingAttack
 #SBATCH -t 7-00:00:00
 
-python main.py --pipeline configs/RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-cluster.yaml
+bash scripts/run_attention_sharpening_cluster.sh

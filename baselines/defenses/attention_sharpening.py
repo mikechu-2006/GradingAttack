@@ -1,6 +1,8 @@
 import functools
+from contextlib import contextmanager
 from typing import List, Union
 
+import torch
 import torch.nn.functional as F
 
 from .base import BaseDefense
@@ -29,7 +31,6 @@ class AttentionSharpening(BaseDefense):
             )
         self.temperature = temperature
         self.layers = layers
-        self._patched_forwards = []
 
     def requires_model_hooks(self) -> bool:
         return True
@@ -44,7 +45,6 @@ class AttentionSharpening(BaseDefense):
             attn = model.model.layers[layer_idx].self_attn
             original_forward = attn.forward
             attn.forward = _make_sharpened_forward(original_forward, self.temperature)
-            self._patched_forwards.append((attn, original_forward))
             removers.append(lambda attn=attn, orig=original_forward: setattr(attn, "forward", orig))
 
         return removers
@@ -58,20 +58,35 @@ class AttentionSharpening(BaseDefense):
         raise ValueError(f"Unsupported layers spec: {self.layers!r}")
 
 
+@contextmanager
+def _sharpened_softmax_context(temperature: float):
+    """Temporarily scale 4D attention logits before softmax."""
+    orig_F_softmax = F.softmax
+    orig_torch_softmax = torch.softmax
+
+    def _scale(input, dim=None, dtype=None, **kw):
+        if isinstance(input, torch.Tensor) and input.dim() == 4:
+            input = input / temperature
+        return orig_F_softmax(input, dim=dim, dtype=dtype, **kw)
+
+    def _scale_torch(input, dim=None, dtype=None, **kw):
+        if isinstance(input, torch.Tensor) and input.dim() == 4:
+            input = input / temperature
+        return orig_torch_softmax(input, dim=dim, dtype=dtype, **kw)
+
+    F.softmax = _scale
+    torch.softmax = _scale_torch
+    try:
+        yield
+    finally:
+        F.softmax = orig_F_softmax
+        torch.softmax = orig_torch_softmax
+
+
 def _make_sharpened_forward(original_forward, temperature: float):
     @functools.wraps(original_forward)
     def forward(*args, **kwargs):
-        orig_softmax = F.softmax
-
-        def sharpened_softmax(input, dim=None, dtype=None, **kw):
-            if input.dim() == 4:
-                input = input / temperature
-            return orig_softmax(input, dim=dim, dtype=dtype, **kw)
-
-        F.softmax = sharpened_softmax
-        try:
+        with _sharpened_softmax_context(temperature):
             return original_forward(*args, **kwargs)
-        finally:
-            F.softmax = orig_softmax
 
     return forward
