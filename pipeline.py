@@ -87,6 +87,8 @@ class GradingDefensePipeline:
                 rng = random.Random(data_config.random_seed)
                 data_list = rng.sample(data_list, data_config.max_samples)
             all_results = []
+            clean_attn_summaries = []
+            attacked_attn_summaries = []
 
             for data in data_list:
                 prompt = config.grading_template.format(
@@ -97,21 +99,56 @@ class GradingDefensePipeline:
 
                 # ── Step 1: 原始推理 ──
                 messages = [{"role": "user", "content": prompt}]
+                if config.debug:
+                    from utils.attention_utils import analyze_prompt_attention
+                    s = analyze_prompt_attention(self.model, self.tokenizer, prompt, label="[CLEAN]")
+                    if s is not None:
+                        clean_attn_summaries.append(s)
                 original_resp = self._generate(messages)
 
                 # ── Step 2: 攻击推理 ──
                 attacked_messages = [{"role": "user", "content": prompt}]
+                attack_suffix = ""
                 if config.attack_method.lower() == "gcg":
+                    import time
                     import nanogcg
                     target = config.params["target"]
                     gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
-                    gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                             [{"role": "user", "content": prompt}],
-                                             target, gcg_config)
-                    attacked_messages[0]["content"] = prompt + gcg_result.best_string
+                    # 将 GCG suffix 插入学生答案内部（</student_answer> 之前）
+                    end_tag = "</student_answer>"
+                    insert_pos = prompt.rfind(end_tag)
+                    if insert_pos != -1:
+                        gcq_prompt = prompt[:insert_pos]
+                        t_start = time.perf_counter()
+                        gcg_result = nanogcg.run(self.model, self.tokenizer,
+                                                 [{"role": "user", "content": gcq_prompt}],
+                                                 target, gcg_config)
+                        t_end = time.perf_counter()
+                        attack_suffix = gcg_result.best_string
+                        attacked_messages[0]["content"] = gcq_prompt + attack_suffix + end_tag
+                    else:
+                        t_start = time.perf_counter()
+                        gcg_result = nanogcg.run(self.model, self.tokenizer,
+                                                 [{"role": "user", "content": prompt}],
+                                                 target, gcg_config)
+                        t_end = time.perf_counter()
+                        attack_suffix = gcg_result.best_string
+                        attacked_messages[0]["content"] = prompt + attack_suffix
+                    print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
                 elif config.attack_method.lower() == "roleplay":
-                    attacked_messages[0]["content"] = prompt + config.params["adv_prompt"]
+                    attack_suffix = config.params["adv_prompt"]
+                    attacked_messages[0]["content"] = prompt + attack_suffix
 
+                if config.debug:
+                    from utils.attention_utils import analyze_prompt_attention
+                    s = analyze_prompt_attention(
+                        self.model, self.tokenizer,
+                        attacked_messages[0]["content"],
+                        gcg_suffix=attack_suffix,
+                        label="[ATTACKED]"
+                    )
+                    if s is not None:
+                        attacked_attn_summaries.append(s)
                 attacked_resp = self._generate(attacked_messages)
 
                 # ── Step 3: 防御推理 ──
@@ -144,9 +181,20 @@ class GradingDefensePipeline:
                                 defended_original_resp = self._generate(
                                     [{"role": "user", "content": defended_prompt}]
                                 )
+                                # 将 attack_suffix 用与 Step 2 同样的规则插入 defended_prompt
+                                if config.attack_method.lower() == "gcg":
+                                    defended_insert_pos = defended_prompt.rfind(end_tag)
+                                    if defended_insert_pos != -1:
+                                        defended_attacked_content = (
+                                            defended_prompt[:defended_insert_pos]
+                                            + attack_suffix + end_tag
+                                        )
+                                    else:
+                                        defended_attacked_content = defended_prompt + attack_suffix
+                                else:
+                                    defended_attacked_content = defended_prompt + attack_suffix
                                 defended_attacked_resp = self._generate(
-                                    [{"role": "user", "content": defended_prompt
-                                      + (attacked_messages[0]["content"][len(prompt):])}]
+                                    [{"role": "user", "content": defended_attacked_content}]
                                 )
 
                             # post_process
@@ -173,6 +221,14 @@ class GradingDefensePipeline:
                 )
                 logger.result(result.as_dict())
                 all_results.append(result.as_dict())
+
+            # ── 打印 attention 平均统计 ──
+            if config.debug and (clean_attn_summaries or attacked_attn_summaries):
+                from utils.attention_utils import print_average_attention
+                if clean_attn_summaries:
+                    print_average_attention(clean_attn_summaries, label="[CLEAN AVERAGE]")
+                if attacked_attn_summaries:
+                    print_average_attention(attacked_attn_summaries, label="[ATTACKED AVERAGE]")
 
             # ── Step 5: 计算指标 ──
             if all_results:

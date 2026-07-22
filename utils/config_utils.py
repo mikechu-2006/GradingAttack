@@ -207,4 +207,14 @@ def print_config_summary(config: AttackConfig):
     # Grading template
     print(f"  [grading_template] ({len(config.grading_template)} chars)", flush=True)
     print(f"    {config.grading_template[:200]}...", flush=True)
+    print(f"", flush=True)
+
+    # Environment
+    import torch, sys, platform
+    print(f"  [environment]", flush=True)
+    print(f"    Python:    {sys.version.split()[0]}", flush=True)
+    print(f"    PyTorch:   {torch.__version__}", flush=True)
+    print(f"    CUDA:      {torch.version.cuda or 'N/A'}", flush=True)
+    print(f"    GPU:       {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'}", flush=True)
+    print(f"    Platform:  {platform.platform()}", flush=True)
     print("=" * 60, flush=True)
