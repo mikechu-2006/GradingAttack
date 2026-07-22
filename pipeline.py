@@ -17,7 +17,13 @@ from typing import List, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from modelscope import snapshot_download
 
-from utils.config_utils import AttackConfig, print_config_summary
+from utils.config_utils import (
+    AttackConfig,
+    print_config_summary,
+    build_run_metadata,
+    format_run_metadata_lines,
+    has_attention_sharpening,
+)
 
 
 def _resolve_model_path(config: AttackConfig) -> str:
@@ -60,9 +66,22 @@ class GradingDefensePipeline:
 
     def run(self):
         config = self.config
+        logger = GradingAttackLogger(config)
+
+        defense_runtime = None
+        if self.defenses:
+            defense_runtime = {
+                "sharpen_clean": True,
+                "sharpen_attacked": True,
+                "attn_implementation": "eager" if has_attention_sharpening(config) else "default",
+            }
+        log_extra = {"defense_runtime": defense_runtime} if defense_runtime else None
+        run_metadata = build_run_metadata(config, extra=log_extra)
+        for line in format_run_metadata_lines(run_metadata):
+            print(line, flush=True)
+            logger.info(line)
         if config.debug:
             print_config_summary(config)
-        logger = GradingAttackLogger(config)
 
         model_path = _resolve_model_path(config)
 
@@ -268,17 +287,7 @@ class GradingDefensePipeline:
                 # ── Step 6: 保存指标 + 配置摘要 ──
                 import json
                 summary = metrics.to_dict()
-                summary["config"] = {
-                    "name": config.name,
-                    "attack_method": config.attack_method,
-                    "model": config.model_config.name,
-                    "model_path": config.model_config.path,
-                    "template": config.template if hasattr(config, "template") else "ci",
-                    "datasets": [d.name for d in config.data_config],
-                    "defenses": [d.__class__.__name__ for d in self.defenses],
-                    "nclass": config.nclass,
-                    "params": config.params,
-                }
+                summary["config"] = build_run_metadata(config, extra=log_extra)
                 with open(logger.metrics_path, "w", encoding="utf-8") as f:
                     json.dump(summary, f, indent=2, ensure_ascii=False)
                 logger.info(f"Metrics saved to {logger.metrics_path}")
