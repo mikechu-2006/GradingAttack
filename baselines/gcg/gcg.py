@@ -31,6 +31,18 @@ class GCG:
         for data_config in config.data_config:
             data_list = read_student_qa_data_from_jsonl(data_config.path)
             for data in data_list:
+                blind_messages = [{
+                    "role": "user",
+                    "content": config.grading_template.format(
+                        question=data.question,
+                        solution="",
+                        student_answer=data.student_answer
+                    )
+                }]
+                gcg_result = nanogcg.run(model, tokenizer, blind_messages, target, gcg_config)
+                best_string = gcg_result.best_string
+                best_loss = gcg_result.best_loss
+
                 messages = [{
                     "role": "user",
                     "content": config.grading_template.format(
@@ -39,10 +51,6 @@ class GCG:
                         student_answer=data.student_answer
                     )
                 }]
-                gcg_result = nanogcg.run(model, tokenizer, messages, target, gcg_config)
-                best_string = gcg_result.best_string
-                best_loss = gcg_result.best_loss
-
                 original_input = tokenizer.apply_chat_template(
                     messages, add_generation_prompt=True, return_tensors="pt"
                 ).to(device)

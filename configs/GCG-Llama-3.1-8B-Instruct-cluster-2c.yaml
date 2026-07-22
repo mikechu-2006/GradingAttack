@@ -19,9 +19,29 @@ model:
   model_id: "LLM-Research/Meta-Llama-3.1-8B-Instruct"
 
 data:
+  - name: gaokao-2023
+    path: ./dataset/gaokao-2023.jsonl
+    max_samples: 40
+    random_seed: 42
+
+  - name: gsm8k
+    path: ./dataset/gsm8k.jsonl
+    max_samples: 40
+    random_seed: 42
+
+  - name: math
+    path: ./dataset/math.jsonl
+    max_samples: 40
+    random_seed: 42
+
+  - name: math23k
+    path: ./dataset/math23k.jsonl
+    max_samples: 40
+    random_seed: 42
+
   - name: scientsbank
     path: ./dataset/scientsbank.jsonl
-    max_samples: 30
+    max_samples: 40
     random_seed: 42
 
 generation:

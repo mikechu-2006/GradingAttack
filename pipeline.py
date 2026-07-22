@@ -134,22 +134,28 @@ class GradingDefensePipeline:
                         import nanogcg
                         target = config.params["target"]
                         gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
-                        # 将 GCG suffix 插入学生答案内部（</student_answer> 之前）
+                        # Blind prompt for GCG optimization (no solution)
+                        blind_prompt = config.grading_template.format(
+                            question=data.question,
+                            solution="",
+                            student_answer=data.student_answer,
+                        )
                         end_tag = "</student_answer>"
-                        insert_pos = prompt.rfind(end_tag)
-                        if insert_pos != -1:
-                            gcq_prompt = prompt[:insert_pos]
+                        blind_insert_pos = blind_prompt.rfind(end_tag)
+                        if blind_insert_pos != -1:
+                            blind_gcq_prompt = blind_prompt[:blind_insert_pos]
                             t_start = time.perf_counter()
                             gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                     [{"role": "user", "content": gcq_prompt}],
+                                                     [{"role": "user", "content": blind_gcq_prompt}],
                                                      target, gcg_config)
                             t_end = time.perf_counter()
                             attack_suffix = gcg_result.best_string
-                            attacked_messages[0]["content"] = gcq_prompt + attack_suffix + end_tag
+                            full_insert_pos = prompt.rfind(end_tag)
+                            attacked_messages[0]["content"] = prompt[:full_insert_pos] + attack_suffix + end_tag
                         else:
                             t_start = time.perf_counter()
                             gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                     [{"role": "user", "content": prompt}],
+                                                     [{"role": "user", "content": blind_prompt}],
                                                      target, gcg_config)
                             t_end = time.perf_counter()
                             attack_suffix = gcg_result.best_string
