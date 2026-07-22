@@ -264,9 +264,9 @@ class GradingDefensePipeline:
                         "original_response": r["original_response"],
                         "attacked_response": r["attacked_response"],
                         "defended_original_response": r.get("meta", {}).get(
-                            "defended_original_response"),
+                            "defended_original_response") or "",
                         "defended_attacked_response": r.get("meta", {}).get(
-                            "defended_attacked_response"),
+                            "defended_attacked_response") or "",
                     }
                     flat_results.append(flat_r)
 
