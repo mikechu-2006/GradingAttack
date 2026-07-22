@@ -2,9 +2,34 @@ from baselines.roleplay.roleplay import RolePlay
 from baselines.gcg.gcg import GCG
 from baselines.defenses import (
     PerplexityFilter, SmoothLLM, SelfReminder,
-    ParaphraseDefense, BaseDefense,
+    ParaphraseDefense, AttentionSharpening, BaseDefense,
 )
 from utils.config_utils import AttackConfig, print_config_summary
+
+
+def _defense_type_key(defense_type: str) -> str:
+    return defense_type.lower().replace("-", "").replace("_", "")
+
+
+def _has_attention_sharpening(config: AttackConfig) -> bool:
+    if not config.defenses:
+        return False
+    return any(
+        _defense_type_key(dc.type) == "attentionsharpening"
+        for dc in config.defenses
+    )
+
+
+def _load_pipeline_model(model_path: str, device: str, config: AttackConfig):
+    import torch
+    from transformers import AutoModelForCausalLM
+
+    kwargs = dict(trust_remote_code=True, torch_dtype=torch.bfloat16)
+    if _has_attention_sharpening(config):
+        kwargs["attn_implementation"] = "eager"
+        print("[grading_attack] Using attn_implementation=eager for Attention Sharpening", flush=True)
+    model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
+    return model.to(device)
 
 
 def _build_defenses(config: AttackConfig, model=None, tokenizer=None):
@@ -32,6 +57,11 @@ def _build_defenses(config: AttackConfig, model=None, tokenizer=None):
             ))
         elif t == "paraphrasedefense" or t == "paraphrase":
             defenses.append(ParaphraseDefense())
+        elif t == "attentionsharpening":
+            defenses.append(AttentionSharpening(
+                temperature=dc.params.get("temperature", 0.5),
+                layers=dc.params.get("layers", "all"),
+            ))
         else:
             raise ValueError(f"Unknown defense type: {dc.type}")
     return defenses
@@ -54,20 +84,16 @@ class GradingAttack:
         if self.config.debug:
             print_config_summary(self.config)
         if self.config.pipeline_mode:
-            from pipeline import GradingDefensePipeline, _resolve_model_path
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from pipeline import GradingDefensePipeline, _resolve_model_path
+            from transformers import AutoTokenizer
 
             device = self.config.params.get("device") or (
                 "cuda" if torch.cuda.is_available() else "cpu"
             )
             model_path = _resolve_model_path(self.config)
             print(f"[grading_attack] Using device: {device}, dtype: bfloat16", flush=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                trust_remote_code=True,
-                torch_dtype=torch.bfloat16,
-            ).to(device)
+            model = _load_pipeline_model(model_path, device, self.config)
             tokenizer = AutoTokenizer.from_pretrained(
                 model_path,
                 trust_remote_code=True,
