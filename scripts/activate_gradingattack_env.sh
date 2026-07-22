@@ -3,28 +3,32 @@
 # HKUST-GZ HPC II 期: module load anaconda3
 # 用法: source scripts/activate_gradingattack_env.sh
 
-_init_conda_shell() {
-    if command -v conda >/dev/null 2>&1; then
-        eval "$(conda shell.bash hook)"
+_init_conda_from_module() {
+    if ! command -v module >/dev/null 2>&1; then
+        return 1
+    fi
+    module load anaconda3 2>/dev/null || return 1
+
+    local conda_exe conda_base
+    conda_exe="$(command -v conda 2>/dev/null || true)"
+    [ -n "${conda_exe}" ] || return 1
+
+    conda_base="$(dirname "$(dirname "${conda_exe}")")"
+    if [ -f "${conda_base}/etc/profile.d/conda.sh" ]; then
+        # shellcheck disable=SC1091
+        source "${conda_base}/etc/profile.d/conda.sh"
         return 0
     fi
-    return 1
+
+    eval "$(conda shell.bash hook)"
 }
 
 _activate_conda() {
-    # HKUST HPC 上优先用 module（计算节点常见路径）
-    if command -v module >/dev/null 2>&1; then
-        module load anaconda3 2>/dev/null || true
-    fi
-    if _init_conda_shell; then
+    if [ "${CONDA_DEFAULT_ENV:-}" = "gradingattack" ] && [ -x "${CONDA_PREFIX:-}/bin/python" ]; then
         return 0
     fi
 
-    if [ -f "${HOME}/.bashrc" ]; then
-        # shellcheck disable=SC1090
-        source "${HOME}/.bashrc"
-    fi
-    if _init_conda_shell; then
+    if _init_conda_from_module; then
         return 0
     fi
 
@@ -36,30 +40,21 @@ _activate_conda() {
         if [ -f "${candidate}" ]; then
             # shellcheck disable=SC1090
             source "${candidate}"
-            if _init_conda_shell; then
-                return 0
-            fi
+            return 0
         fi
     done
-
-    if command -v module >/dev/null 2>&1; then
-        for mod in miniconda3 conda Python/anaconda3; do
-            module load "${mod}" 2>/dev/null || continue
-            if _init_conda_shell; then
-                return 0
-            fi
-        done
-    fi
 
     return 1
 }
 
 if ! _activate_conda; then
-    echo "[env] conda not found. Try on login/compute node:" >&2
+    echo "[env] conda not found. Try:" >&2
     echo "      module load anaconda3" >&2
-    echo "      eval \"\$(conda shell.bash hook)\"" >&2
-    echo "      conda env list" >&2
+    echo "      source \"\$(dirname \"\$(dirname \"\$(which conda)\")\")/etc/profile.d/conda.sh\"" >&2
+    echo "      conda activate gradingattack" >&2
     return 1 2>/dev/null || exit 1
 fi
 
-conda activate gradingattack
+if [ "${CONDA_DEFAULT_ENV:-}" != "gradingattack" ]; then
+    conda activate gradingattack
+fi
