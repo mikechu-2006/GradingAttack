@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -p i64m1tga800u
+#SBATCH -p i64m1tga40u
 #SBATCH -o output_%j.txt
 #SBATCH -e err_%j.txt
 #SBATCH -n 8
