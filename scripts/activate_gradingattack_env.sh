@@ -1,18 +1,30 @@
 #!/bin/bash
 # 在计算节点上初始化 conda 并激活 gradingattack 环境。
+# HKUST-GZ HPC II 期: module load anaconda3
 # 用法: source scripts/activate_gradingattack_env.sh
 
-_activate_conda() {
+_init_conda_shell() {
     if command -v conda >/dev/null 2>&1; then
+        eval "$(conda shell.bash hook)"
+        return 0
+    fi
+    return 1
+}
+
+_activate_conda() {
+    # HKUST HPC 上优先用 module（计算节点常见路径）
+    if command -v module >/dev/null 2>&1; then
+        module load anaconda3 2>/dev/null || true
+    fi
+    if _init_conda_shell; then
         return 0
     fi
 
-    # 非交互 shell（srun --pty bash）通常不会加载 .bashrc
     if [ -f "${HOME}/.bashrc" ]; then
         # shellcheck disable=SC1090
         source "${HOME}/.bashrc"
     fi
-    if command -v conda >/dev/null 2>&1; then
+    if _init_conda_shell; then
         return 0
     fi
 
@@ -24,13 +36,16 @@ _activate_conda() {
         if [ -f "${candidate}" ]; then
             # shellcheck disable=SC1090
             source "${candidate}"
-            return 0
+            if _init_conda_shell; then
+                return 0
+            fi
         fi
     done
 
     if command -v module >/dev/null 2>&1; then
-        for mod in anaconda3 miniconda3 conda Python/anaconda3; do
-            if module load "${mod}" 2>/dev/null && command -v conda >/dev/null 2>&1; then
+        for mod in miniconda3 conda Python/anaconda3; do
+            module load "${mod}" 2>/dev/null || continue
+            if _init_conda_shell; then
                 return 0
             fi
         done
@@ -40,10 +55,10 @@ _activate_conda() {
 }
 
 if ! _activate_conda; then
-    echo "[env] conda not found. On login node, run:" >&2
-    echo "      which conda" >&2
-    echo "      module avail 2>&1 | grep -i conda" >&2
-    echo "Then add the correct init path to scripts/activate_gradingattack_env.sh" >&2
+    echo "[env] conda not found. Try on login/compute node:" >&2
+    echo "      module load anaconda3" >&2
+    echo "      eval \"\$(conda shell.bash hook)\"" >&2
+    echo "      conda env list" >&2
     return 1 2>/dev/null || exit 1
 fi
 
