@@ -100,6 +100,10 @@ class GradingDefensePipeline:
                 trust_remote_code=True,
             )
 
+        all_clean_attn_summaries = []   # (summary, dataset_name)
+        all_attacked_attn_summaries = []
+        all_attn_dfs = []
+
         for data_config in config.data_config:
             data_list = read_student_qa_data_from_jsonl(data_config.path)
             if data_config.max_samples and data_config.max_samples < len(data_list):
@@ -255,11 +259,27 @@ class GradingDefensePipeline:
 
             # ── 打印 attention 平均统计 ──
             if config.debug and (clean_attn_summaries or attacked_attn_summaries):
-                from utils.attention_utils import print_average_attention
+                from utils.attention_utils import (
+                    print_average_attention,
+                    print_attacked_attention_stats,
+                    build_attention_dataframe,
+                )
+                ds_label = f"[CLEAN AVERAGE {data_config.name}]"
                 if clean_attn_summaries:
-                    print_average_attention(clean_attn_summaries, label="[CLEAN AVERAGE]")
+                    all_clean_attn_summaries.extend(
+                        (s, data_config.name) for s in clean_attn_summaries
+                    )
+                    print_average_attention(clean_attn_summaries, label=ds_label)
                 if attacked_attn_summaries:
-                    print_average_attention(attacked_attn_summaries, label="[ATTACKED AVERAGE]")
+                    all_attacked_attn_summaries.extend(
+                        (s, data_config.name) for s in attacked_attn_summaries
+                    )
+                    atk_label = f"[ATTACKED AVERAGE {data_config.name}]"
+                    print_attacked_attention_stats(attacked_attn_summaries, label=atk_label)
+                df = build_attention_dataframe(clean_attn_summaries,
+                                               attacked_attn_summaries,
+                                               data_config.name)
+                all_attn_dfs.append(df)
 
             # ── Step 5: 计算指标 ──
             if all_results:
@@ -334,6 +354,28 @@ class GradingDefensePipeline:
                 + f"[DATASET] {data_config.name}  "
                 + f"Finished"
             )
+
+        # ── 跨数据集总体 attention 统计 ──
+        if config.debug and (all_clean_attn_summaries or all_attacked_attn_summaries):
+            from utils.attention_utils import (
+                print_average_attention,
+                print_attacked_attention_stats,
+            )
+            if all_clean_attn_summaries:
+                clean_only = [s for s, _ in all_clean_attn_summaries]
+                print_average_attention(clean_only, label="[CLEAN AVERAGE OVERALL]")
+            if all_attacked_attn_summaries:
+                atk_only = [s for s, _ in all_attacked_attn_summaries]
+                print_attacked_attention_stats(atk_only, label="[ATTACKED AVERAGE OVERALL]")
+
+        # ── CSV 导出 ──
+        if config.debug and all_attn_dfs:
+            import pandas as pd
+            combined_df = pd.concat(all_attn_dfs, ignore_index=True)
+            csv_path = os.path.splitext(logger.result_path)[0] + "_attention.csv"
+            combined_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+            print(f"[ATTENTION] DataFrame saved to {csv_path}  ({len(combined_df)} rows)", flush=True)
+            logger.info(f"Attention DataFrame saved to {csv_path}")
 
     def _generate(self, messages: list) -> str:
         inputs = self.tokenizer.apply_chat_template(
