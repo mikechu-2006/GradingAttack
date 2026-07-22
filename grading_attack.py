@@ -52,21 +52,22 @@ class GradingAttack:
 
     def run(self):
         if self.config.pipeline_mode:
-            from pipeline import GradingDefensePipeline
+            from pipeline import GradingDefensePipeline, _resolve_model_path
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
             device = self.config.params.get("device") or (
                 "cuda" if torch.cuda.is_available() else "cpu"
             )
+            model_path = _resolve_model_path(self.config)
             print(f"[grading_attack] Using device: {device}, dtype: bfloat16", flush=True)
             model = AutoModelForCausalLM.from_pretrained(
-                self.config.model_config.path,
+                model_path,
                 trust_remote_code=True,
                 torch_dtype=torch.bfloat16,
             ).to(device)
             tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model_config.path,
+                model_path,
                 trust_remote_code=True,
             )
             defenses = _build_defenses(self.config, model, tokenizer)

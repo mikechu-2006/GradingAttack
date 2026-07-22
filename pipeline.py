@@ -10,12 +10,26 @@ Attack-Defense 联合评估 Pipeline。
     - GradingAttack (ICLR 2026)
 """
 
+import os
 import torch
 import random
 from typing import List, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from modelscope import snapshot_download
 
 from utils.config_utils import AttackConfig
+
+
+def _resolve_model_path(config: AttackConfig) -> str:
+    """Return local model path, downloading via ModelScope if needed."""
+    if config.model_config.path:
+        return config.model_config.path
+    if config.model_config.model_id:
+        cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "modelscope", "hub")
+        print(f"[pipeline] Downloading model {config.model_config.model_id} from ModelScope...", flush=True)
+        return snapshot_download(config.model_config.model_id, cache_dir=cache_dir)
+    raise ValueError("Either model.path or model.model_id must be set in config")
+
 from utils.log_utils import GradingAttackLogger
 from utils.data_utils import read_student_qa_data_from_jsonl, AttackResult
 from eval.metrics import compute_metrics, EvalMetrics
@@ -50,14 +64,15 @@ class GradingDefensePipeline:
 
         # 如果未传入 model，在此加载 (RolePlay 用 vLLM 则不需)
         if self.model is None:
+            model_path = _resolve_model_path(config)
             self.model = AutoModelForCausalLM.from_pretrained(
-                config.model_config.path,
+                model_path,
                 trust_remote_code=True,
                 torch_dtype=torch.bfloat16,
             ).to(self.device)
         if self.tokenizer is None:
             self.tokenizer = AutoTokenizer.from_pretrained(
-                config.model_config.path,
+                model_path,
                 trust_remote_code=True,
             )
 
