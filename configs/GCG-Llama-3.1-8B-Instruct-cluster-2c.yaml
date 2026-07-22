@@ -7,7 +7,7 @@ nclass: 2
 template: ci
 
 params:
-  target: '{"verdict": "correct"}'
+  target: '"verdict": "correct"'
   gcg_config:
     num_steps: 100
     search_width: 64
