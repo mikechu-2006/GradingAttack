@@ -325,6 +325,51 @@ def compute_student_suffix_stats(summaries: list) -> dict:
     return result
 
 
+def compute_student_stats(summaries: list) -> dict:
+    """对 clean summaries 计算 student segment attention 的 mean/std/min/max。
+
+    Returns dict with keys "last_layer" and "last_3_avg", each containing
+    {"mean", "std", "min", "max", "n"}.
+    """
+    result = {}
+    for layer_name in ["last_layer", "last_3_avg"]:
+        values = []
+        for s in summaries:
+            w = s.get(layer_name)
+            if not w:
+                continue
+            values.append(w.get("student", 0.0))
+        if not values:
+            result[layer_name] = {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "n": 0}
+            continue
+        mean = sum(values) / len(values)
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
+        std = math.sqrt(variance)
+        result[layer_name] = {
+            "mean": mean,
+            "std": std,
+            "min": min(values),
+            "max": max(values),
+            "n": len(values),
+        }
+    return result
+
+
+def print_clean_attention_stats(clean_summaries: list, label: str = "[CLEAN]"):
+    """打印 clean 的 per-segment 平均 + student attention 统计。"""
+    if not clean_summaries:
+        return
+    print_average_attention(clean_summaries, label=label)
+    stats = compute_student_stats(clean_summaries)
+    for layer_name in ["last_layer", "last_3_avg"]:
+        st = stats[layer_name]
+        layer_label = "last layer" if layer_name == "last_layer" else "last 3 avg"
+        print(f"\n  [STUDENT] {label}  —  {layer_label}  (n={st['n']})", flush=True)
+        print(f"    mean={st['mean']:.4f}  std={st['std']:.4f}  "
+              f"min={st['min']:.4f}  max={st['max']:.4f}", flush=True)
+    print(f"{'='*70}", flush=True)
+
+
 def print_attacked_attention_stats(attacked_summaries: list, label: str = "[ATTACKED]"):
     """打印 attacked 的 per-segment 平均 + student+suffix 合并统计。"""
     if not attacked_summaries:

@@ -260,7 +260,7 @@ class GradingDefensePipeline:
             # ── 打印 attention 平均统计 ──
             if config.debug and (clean_attn_summaries or attacked_attn_summaries):
                 from utils.attention_utils import (
-                    print_average_attention,
+                    print_clean_attention_stats,
                     print_attacked_attention_stats,
                     build_attention_dataframe,
                 )
@@ -269,7 +269,7 @@ class GradingDefensePipeline:
                     all_clean_attn_summaries.extend(
                         (s, data_config.name) for s in clean_attn_summaries
                     )
-                    print_average_attention(clean_attn_summaries, label=ds_label)
+                    print_clean_attention_stats(clean_attn_summaries, label=ds_label)
                 if attacked_attn_summaries:
                     all_attacked_attn_summaries.extend(
                         (s, data_config.name) for s in attacked_attn_summaries
@@ -358,12 +358,12 @@ class GradingDefensePipeline:
         # ── 跨数据集总体 attention 统计 ──
         if config.debug and (all_clean_attn_summaries or all_attacked_attn_summaries):
             from utils.attention_utils import (
-                print_average_attention,
+                print_clean_attention_stats,
                 print_attacked_attention_stats,
             )
             if all_clean_attn_summaries:
                 clean_only = [s for s, _ in all_clean_attn_summaries]
-                print_average_attention(clean_only, label="[CLEAN AVERAGE OVERALL]")
+                print_clean_attention_stats(clean_only, label="[CLEAN AVERAGE OVERALL]")
             if all_attacked_attn_summaries:
                 atk_only = [s for s, _ in all_attacked_attn_summaries]
                 print_attacked_attention_stats(atk_only, label="[ATTACKED AVERAGE OVERALL]")
