@@ -90,137 +90,143 @@ class GradingDefensePipeline:
             clean_attn_summaries = []
             attacked_attn_summaries = []
 
-            for data in data_list:
-                prompt = config.grading_template.format(
-                    question=data.question,
-                    solution=data.question_answer,
-                    student_answer=data.student_answer,
-                )
-
-                # ── Step 1: 原始推理 ──
-                messages = [{"role": "user", "content": prompt}]
-                if config.debug:
-                    from utils.attention_utils import analyze_prompt_attention
-                    s = analyze_prompt_attention(self.model, self.tokenizer, prompt, label="[CLEAN]")
-                    if s is not None:
-                        clean_attn_summaries.append(s)
-                original_resp = self._generate(messages)
-
-                # ── Step 2: 攻击推理 ──
-                attacked_messages = [{"role": "user", "content": prompt}]
-                attack_suffix = ""
-                if config.attack_method.lower() == "gcg":
-                    import time
-                    import nanogcg
-                    target = config.params["target"]
-                    gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
-                    # 将 GCG suffix 插入学生答案内部（</student_answer> 之前）
-                    end_tag = "</student_answer>"
-                    insert_pos = prompt.rfind(end_tag)
-                    if insert_pos != -1:
-                        gcq_prompt = prompt[:insert_pos]
-                        t_start = time.perf_counter()
-                        gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                 [{"role": "user", "content": gcq_prompt}],
-                                                 target, gcg_config)
-                        t_end = time.perf_counter()
-                        attack_suffix = gcg_result.best_string
-                        attacked_messages[0]["content"] = gcq_prompt + attack_suffix + end_tag
-                    else:
-                        t_start = time.perf_counter()
-                        gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                 [{"role": "user", "content": prompt}],
-                                                 target, gcg_config)
-                        t_end = time.perf_counter()
-                        attack_suffix = gcg_result.best_string
-                        attacked_messages[0]["content"] = prompt + attack_suffix
-                    print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
-                elif config.attack_method.lower() == "roleplay":
-                    attack_suffix = config.params["adv_prompt"]
-                    attacked_messages[0]["content"] = prompt + attack_suffix
-
-                if config.debug:
-                    from utils.attention_utils import analyze_prompt_attention
-                    s = analyze_prompt_attention(
-                        self.model, self.tokenizer,
-                        attacked_messages[0]["content"],
-                        gcg_suffix=attack_suffix,
-                        label="[ATTACKED]"
+            for data_idx, data in enumerate(data_list):
+                try:
+                    prompt = config.grading_template.format(
+                        question=data.question,
+                        solution=data.question_answer,
+                        student_answer=data.student_answer,
                     )
-                    if s is not None:
-                        attacked_attn_summaries.append(s)
-                attacked_resp = self._generate(attacked_messages)
 
-                # ── Step 3: 防御推理 ──
-                defended_original_resp = None
-                defended_attacked_resp = None
-                rejected = False
+                    # ── Step 1: 原始推理 ──
+                    messages = [{"role": "user", "content": prompt}]
+                    if config.debug:
+                        from utils.attention_utils import analyze_prompt_attention
+                        s = analyze_prompt_attention(self.model, self.tokenizer, prompt, label="[CLEAN]")
+                        if s is not None:
+                            clean_attn_summaries.append(s)
+                    original_resp = self._generate(messages)
 
-                if self.defenses:
-                    hook_removers = []
-                    for d in self.defenses:
-                        if d.requires_model_hooks():
-                            hook_removers.extend(d.install_model_hooks(self.model))
+                    # ── Step 2: 攻击推理 ──
+                    attacked_messages = [{"role": "user", "content": prompt}]
+                    attack_suffix = ""
+                    if config.attack_method.lower() == "gcg":
+                        import time
+                        import nanogcg
+                        target = config.params["target"]
+                        gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
+                        # 将 GCG suffix 插入学生答案内部（</student_answer> 之前）
+                        end_tag = "</student_answer>"
+                        insert_pos = prompt.rfind(end_tag)
+                        if insert_pos != -1:
+                            gcq_prompt = prompt[:insert_pos]
+                            t_start = time.perf_counter()
+                            gcg_result = nanogcg.run(self.model, self.tokenizer,
+                                                     [{"role": "user", "content": gcq_prompt}],
+                                                     target, gcg_config)
+                            t_end = time.perf_counter()
+                            attack_suffix = gcg_result.best_string
+                            attacked_messages[0]["content"] = gcq_prompt + attack_suffix + end_tag
+                        else:
+                            t_start = time.perf_counter()
+                            gcg_result = nanogcg.run(self.model, self.tokenizer,
+                                                     [{"role": "user", "content": prompt}],
+                                                     target, gcg_config)
+                            t_end = time.perf_counter()
+                            attack_suffix = gcg_result.best_string
+                            attacked_messages[0]["content"] = prompt + attack_suffix
+                        print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
+                    elif config.attack_method.lower() == "roleplay":
+                        attack_suffix = config.params["adv_prompt"]
+                        attacked_messages[0]["content"] = prompt + attack_suffix
 
-                    try:
+                    if config.debug:
+                        from utils.attention_utils import analyze_prompt_attention
+                        s = analyze_prompt_attention(
+                            self.model, self.tokenizer,
+                            attacked_messages[0]["content"],
+                            gcg_suffix=attack_suffix,
+                            label="[ATTACKED]"
+                        )
+                        if s is not None:
+                            attacked_attn_summaries.append(s)
+                    attacked_resp = self._generate(attacked_messages)
+
+                    # ── Step 3: 防御推理 ──
+                    defended_original_resp = None
+                    defended_attacked_resp = None
+                    rejected = False
+
+                    if self.defenses:
+                        hook_removers = []
+                        for d in self.defenses:
+                            if d.requires_model_hooks():
+                                hook_removers.extend(d.install_model_hooks(self.model))
+
                         try:
-                            # 对有多次推理需求的 defense 做批量扰动+投票
-                            if self.multi_gen_defenses:
-                                defended_original_resp = self._generate_with_voting(
-                                    [{"role": "user", "content": prompt}]
-                                )
-                                defended_attacked_resp = self._generate_with_voting(
-                                    attacked_messages
-                                )
-                            else:
-                                # pre_process 单次
-                                defended_prompt = prompt
-                                for d in self.defenses:
-                                    defended_prompt = d.pre_process(defended_prompt)
+                            try:
+                                # 对有多次推理需求的 defense 做批量扰动+投票
+                                if self.multi_gen_defenses:
+                                    defended_original_resp = self._generate_with_voting(
+                                        [{"role": "user", "content": prompt}]
+                                    )
+                                    defended_attacked_resp = self._generate_with_voting(
+                                        attacked_messages
+                                    )
+                                else:
+                                    # pre_process 单次
+                                    defended_prompt = prompt
+                                    for d in self.defenses:
+                                        defended_prompt = d.pre_process(defended_prompt)
 
-                                defended_original_resp = self._generate(
-                                    [{"role": "user", "content": defended_prompt}]
-                                )
-                                # 将 attack_suffix 用与 Step 2 同样的规则插入 defended_prompt
-                                if config.attack_method.lower() == "gcg":
-                                    defended_insert_pos = defended_prompt.rfind(end_tag)
-                                    if defended_insert_pos != -1:
-                                        defended_attacked_content = (
-                                            defended_prompt[:defended_insert_pos]
-                                            + attack_suffix + end_tag
-                                        )
+                                    defended_original_resp = self._generate(
+                                        [{"role": "user", "content": defended_prompt}]
+                                    )
+                                    # 将 attack_suffix 用与 Step 2 同样的规则插入 defended_prompt
+                                    if config.attack_method.lower() == "gcg":
+                                        defended_insert_pos = defended_prompt.rfind(end_tag)
+                                        if defended_insert_pos != -1:
+                                            defended_attacked_content = (
+                                                defended_prompt[:defended_insert_pos]
+                                                + attack_suffix + end_tag
+                                            )
+                                        else:
+                                            defended_attacked_content = defended_prompt + attack_suffix
                                     else:
                                         defended_attacked_content = defended_prompt + attack_suffix
-                                else:
-                                    defended_attacked_content = defended_prompt + attack_suffix
-                                defended_attacked_resp = self._generate(
-                                    [{"role": "user", "content": defended_attacked_content}]
-                                )
+                                    defended_attacked_resp = self._generate(
+                                        [{"role": "user", "content": defended_attacked_content}]
+                                    )
 
-                            # post_process
-                            for d in self.defenses:
-                                defended_original_resp = d.post_process(defended_original_resp or "")
-                                defended_attacked_resp = d.post_process(defended_attacked_resp or "")
+                                # post_process
+                                for d in self.defenses:
+                                    defended_original_resp = d.post_process(defended_original_resp or "")
+                                    defended_attacked_resp = d.post_process(defended_attacked_resp or "")
 
-                        except DefenseRejectException:
-                            rejected = True
-                    finally:
-                        for remove in hook_removers:
-                            remove()
+                            except DefenseRejectException:
+                                rejected = True
+                        finally:
+                            for remove in hook_removers:
+                                remove()
 
-                # ── Step 4: 记录结果 ──
-                result = AttackResult(
-                    student_qa_data=data,
-                    original_response=original_resp,
-                    attacked_response=attacked_resp,
-                    meta={
-                        "defended_original_response": defended_original_resp,
-                        "defended_attacked_response": defended_attacked_resp,
-                        "rejected": rejected,
-                    }
-                )
-                logger.result(result.as_dict())
-                all_results.append(result.as_dict())
+                    # ── Step 4: 记录结果 ──
+                    result = AttackResult(
+                        student_qa_data=data,
+                        original_response=original_resp,
+                        attacked_response=attacked_resp,
+                        meta={
+                            "defended_original_response": defended_original_resp,
+                            "defended_attacked_response": defended_attacked_resp,
+                            "rejected": rejected,
+                        }
+                    )
+                    logger.result(result.as_dict())
+                    all_results.append(result.as_dict())
+
+                except Exception as e:
+                    import traceback
+                    print(f"[ERROR] Sample {data_idx} failed: {e}", flush=True)
+                    traceback.print_exc()
 
             # ── 打印 attention 平均统计 ──
             if config.debug and (clean_attn_summaries or attacked_attn_summaries):
@@ -245,7 +251,16 @@ class GradingDefensePipeline:
                     }
                     flat_results.append(flat_r)
 
-                metrics: EvalMetrics = compute_metrics(flat_results, nclass=config.nclass)
+                try:
+                    metrics: EvalMetrics = compute_metrics(flat_results, nclass=config.nclass)
+                except Exception as e:
+                    import traceback
+                    print(f"[ERROR] compute_metrics failed: {e}", flush=True)
+                    traceback.print_exc()
+                    logger.info(f"compute_metrics failed: {e}")
+                    all_results.clear()
+                    continue
+
                 if self.defenses:
                     logger.info(
                         f"[{config.model_config.name}] [{data_config.name}] "
@@ -273,15 +288,21 @@ class GradingDefensePipeline:
                     "attack_method": config.attack_method,
                     "model": config.model_config.name,
                     "model_path": config.model_config.path,
-                    "template": config.template if hasattr(config, "template") else "ci",
+                    "template": "ci",
                     "datasets": [d.name for d in config.data_config],
                     "defenses": [d.__class__.__name__ for d in self.defenses],
                     "nclass": config.nclass,
                     "params": config.params,
                 }
-                with open(logger.metrics_path, "w", encoding="utf-8") as f:
-                    json.dump(summary, f, indent=2, ensure_ascii=False)
-                logger.info(f"Metrics saved to {logger.metrics_path}")
+                try:
+                    with open(logger.metrics_path, "w", encoding="utf-8") as f:
+                        json.dump(summary, f, indent=2, ensure_ascii=False)
+                    logger.info(f"Metrics saved to {logger.metrics_path}")
+                except Exception as e:
+                    import traceback
+                    print(f"[ERROR] Failed to save metrics: {e}", flush=True)
+                    traceback.print_exc()
+                    logger.info(f"Failed to save metrics: {e}")
 
             logger.info(
                 f"[MODEL] {config.model_config.name}  "
