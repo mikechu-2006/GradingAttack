@@ -3,8 +3,17 @@ set -euo pipefail
 
 cd ~/GradingAttack
 
+if [ "${CONDA_DEFAULT_ENV:-}" = "gradingattack" ] && [ -x "${CONDA_PREFIX:-}/bin/python" ]; then
+    PYTHON="${CONDA_PREFIX}/bin/python"
+    echo "[smoke] Using active conda env: gradingattack (${PYTHON})"
+else
+    # shellcheck disable=SC1091
+    source scripts/activate_gradingattack_env.sh
+    PYTHON=python
+fi
+
 echo "[smoke] Running Attention Sharpening pipeline (5 samples)..."
-python main.py --pipeline configs/RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-smoke.yaml
+"${PYTHON}" main.py --pipeline configs/RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-smoke.yaml
 
 echo
 echo "[smoke] Latest metrics:"
