@@ -1,13 +1,13 @@
-name: GCG-Llama-3.1-8B-Instruct-smoothllm
+name: GCG-Llama-3.1-8B-Instruct-2c
 
 method: GCG
 pipeline_mode: true
+debug: true
+nclass: 2
 template: ci
-nclass: 3
 
 params:
-  device: cuda:0
-  target: '{"verdict": "correct"}'
+  target: '"verdict": "correct"'
   gcg_config:
     num_steps: 100
     search_width: 64
@@ -16,23 +16,18 @@ params:
 
 model:
   name: Llama-3.1-8B-Instruct
-  path: meta-llama/Llama-3.1-8B-Instruct
   model_id: "LLM-Research/Meta-Llama-3.1-8B-Instruct"
 
 data:
   - name: scientsbank
     path: ./dataset/scientsbank.jsonl
+    max_samples: 30
+    random_seed: 42
 
 generation:
   temperature: 0.01
   max_tokens: 1024
 
 log:
-  log_dir: ./logs_defense
-  result_dir: ./result_defense
-
-defenses:
-  - type: smooth_llm
-    params:
-      num_copies: 5
-      perturb_rate: 0.1
+  log_dir: ./logs
+  result_dir: ./result

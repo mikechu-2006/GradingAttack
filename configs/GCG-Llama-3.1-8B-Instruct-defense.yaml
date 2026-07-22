@@ -2,6 +2,8 @@ name: GCG-Llama-3.1-8B-Instruct-defense
 
 method: GCG
 pipeline_mode: true
+template: ci
+nclass: 3
 
 params:
   device: cuda:0

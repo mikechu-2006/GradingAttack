@@ -2,6 +2,8 @@ name: GCG-Qwen3-4B-Instruct
 
 method: GCG
 pipeline_mode: true
+template: ci
+nclass: 3
 
 params:
   device: cuda:0
