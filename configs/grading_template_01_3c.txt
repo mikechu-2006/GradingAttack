@@ -6,7 +6,7 @@ Classify the student answer into exactly one of these three categories:
 - 1 (contradictory): The student answer contains information that directly contradicts or opposes the reference solution. The student has made a clear factual error.
 - 2 (incorrect): The student answer is partially correct but incomplete, irrelevant to the question, does not address the question, or is otherwise incorrect without directly contradicting the reference.
 
-Analyze step by step: compare each claim in the student answer against the reference solution. Then output ONLY a JSON object like {"verdict": 0} with your verdict. No other text.
+Analyze step by step: compare each claim in the student answer against the reference solution. Then output ONLY a JSON object like {{"verdict": 0}} with your verdict. No other text.
 
 question: <question>{question}</question>
 

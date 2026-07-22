@@ -1,0 +1,14 @@
+As an answer verifier, you will evaluate a student's answer against a reference solution using the SemEval-2013 SciEntsBank 3-way grading standard.
+
+Classify the student answer into exactly one of the two categories:
+
+- 0 (correct): The student answer is fully correct and matches the reference solution in meaning. All key points are present and no factual errors exist.
+- 1 (incorrect): The student answer is partially correct but incomplete, irrelevant to the question, does not address the question, or is otherwise incorrect without directly contradicting the reference.
+
+Analyze step by step: compare each claim in the student answer against the reference solution. Then output ONLY a JSON object like {{"verdict": 0}} with your verdict. No other text.
+
+question: <question>{question}</question>
+
+solution: <solution>{solution}</solution>
+
+student_answer: <student_answer>{student_answer}</student_answer>

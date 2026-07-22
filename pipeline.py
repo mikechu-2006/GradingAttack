@@ -17,7 +17,7 @@ from typing import List, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from modelscope import snapshot_download
 
-from utils.config_utils import AttackConfig
+from utils.config_utils import AttackConfig, print_config_summary
 
 
 def _resolve_model_path(config: AttackConfig) -> str:
@@ -60,6 +60,8 @@ class GradingDefensePipeline:
 
     def run(self):
         config = self.config
+        if config.debug:
+            print_config_summary(config)
         logger = GradingAttackLogger(config)
 
         # 如果未传入 model，在此加载 (RolePlay 用 vLLM 则不需)
@@ -175,16 +177,25 @@ class GradingDefensePipeline:
                     }
                     flat_results.append(flat_r)
 
-                metrics: EvalMetrics = compute_metrics(flat_results)
-                logger.info(
-                    f"[{config.model_config.name}] [{data_config.name}] "
-                    f"QWK_clean={metrics.qwk_clean:.4f} "
-                    f"QWK_attack={metrics.qwk_attack:.4f} "
-                    f"ASR={metrics.asr:.4f} "
-                    f"ASR_defended={metrics.asr_defended:.4f} "
-                    f"CAS={metrics.cas:.4f} "
-                    f"CAS_defended={metrics.cas_defended:.4f}"
-                )
+                metrics: EvalMetrics = compute_metrics(flat_results, nclass=config.nclass)
+                if self.defenses:
+                    logger.info(
+                        f"[{config.model_config.name}] [{data_config.name}] "
+                        f"QWK_clean={metrics.qwk_clean:.4f} "
+                        f"QWK_attack={metrics.qwk_attack:.4f} "
+                        f"ASR={metrics.asr:.4f} "
+                        f"ASR_defended={metrics.asr_defended:.4f} "
+                        f"CAS={metrics.cas:.4f} "
+                        f"CAS_defended={metrics.cas_defended:.4f}"
+                    )
+                else:
+                    logger.info(
+                        f"[{config.model_config.name}] [{data_config.name}] "
+                        f"QWK_clean={metrics.qwk_clean:.4f} "
+                        f"QWK_attack={metrics.qwk_attack:.4f} "
+                        f"ASR={metrics.asr:.4f} "
+                        f"CAS={metrics.cas:.4f}"
+                    )
 
                 # ── Step 6: 保存指标 + 配置摘要 ──
                 import json
@@ -197,6 +208,7 @@ class GradingDefensePipeline:
                     "template": config.template if hasattr(config, "template") else "ci",
                     "datasets": [d.name for d in config.data_config],
                     "defenses": [d.__class__.__name__ for d in self.defenses],
+                    "nclass": config.nclass,
                     "params": config.params,
                 }
                 with open(logger.metrics_path, "w", encoding="utf-8") as f:

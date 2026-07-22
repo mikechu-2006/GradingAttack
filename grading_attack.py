@@ -4,7 +4,7 @@ from baselines.defenses import (
     PerplexityFilter, SmoothLLM, SelfReminder,
     ParaphraseDefense, BaseDefense,
 )
-from utils.config_utils import AttackConfig
+from utils.config_utils import AttackConfig, print_config_summary
 
 
 def _build_defenses(config: AttackConfig, model=None, tokenizer=None):
@@ -51,6 +51,8 @@ class GradingAttack:
             raise ValueError(f"Not supported attack method {config.attack_method}")
 
     def run(self):
+        if self.config.debug:
+            print_config_summary(self.config)
         if self.config.pipeline_mode:
             from pipeline import GradingDefensePipeline, _resolve_model_path
             import torch
