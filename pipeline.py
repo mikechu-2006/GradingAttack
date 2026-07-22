@@ -17,7 +17,13 @@ from typing import List, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from modelscope import snapshot_download
 
-from utils.config_utils import AttackConfig, print_config_summary
+from utils.config_utils import (
+    AttackConfig,
+    print_config_summary,
+    build_run_metadata,
+    format_run_metadata_lines,
+    has_attention_sharpening,
+)
 
 
 def _resolve_model_path(config: AttackConfig) -> str:
@@ -60,9 +66,22 @@ class GradingDefensePipeline:
 
     def run(self):
         config = self.config
+        logger = GradingAttackLogger(config)
+
+        defense_runtime = None
+        if self.defenses:
+            defense_runtime = {
+                "sharpen_clean": True,
+                "sharpen_attacked": True,
+                "attn_implementation": "eager" if has_attention_sharpening(config) else "default",
+            }
+        log_extra = {"defense_runtime": defense_runtime} if defense_runtime else None
+        run_metadata = build_run_metadata(config, extra=log_extra)
+        for line in format_run_metadata_lines(run_metadata):
+            print(line, flush=True)
+            logger.info(line)
         if config.debug:
             print_config_summary(config)
-        logger = GradingAttackLogger(config)
 
         model_path = _resolve_model_path(config)
 

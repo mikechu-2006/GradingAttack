@@ -129,6 +129,110 @@ def parse_config(path: str) -> AttackConfig:
     )
 
 
+def _defense_type_key(defense_type: str) -> str:
+    return defense_type.lower().replace("-", "").replace("_", "")
+
+
+def has_attention_sharpening(config: AttackConfig) -> bool:
+    if not config.defenses:
+        return False
+    return any(
+        _defense_type_key(dc.type) == "attentionsharpening"
+        for dc in config.defenses
+    )
+
+
+def build_run_metadata(config: AttackConfig, extra: Optional[Dict] = None) -> Dict:
+    """Structured experiment metadata for metrics JSON and run logs."""
+    mc = config.model_config
+    gc = config.generation_config
+    metadata = {
+        "name": config.name,
+        "attack_method": config.attack_method,
+        "model": mc.name,
+        "model_path": mc.path,
+        "model_id": mc.model_id,
+        "template": getattr(config, "template", "ci"),
+        "nclass": config.nclass,
+        "generation": gc.as_dict(),
+        "data": [asdict(dc) for dc in config.data_config],
+        "params": config.params or {},
+        "defenses": [
+            {"type": dc.type, "params": dict(dc.params or {})}
+            for dc in (config.defenses or [])
+        ],
+    }
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
+def format_run_metadata_lines(metadata: Dict) -> List[str]:
+    """Compact, stable log lines shared by stdout and .log files."""
+    lines = [
+        "=" * 60,
+        "[RUN_CONFIG] Experiment metadata",
+        "=" * 60,
+        f"  name:          {metadata.get('name')}",
+        f"  attack_method: {metadata.get('attack_method')}",
+        f"  model:         {metadata.get('model')}",
+        f"  model_path:    {metadata.get('model_path') or '(auto-download)'}",
+        f"  model_id:      {metadata.get('model_id') or '(not set)'}",
+        f"  template:      {metadata.get('template')}",
+        f"  nclass:        {metadata.get('nclass')}",
+        "",
+    ]
+
+    gen = metadata.get("generation") or {}
+    lines.extend([
+        "  [generation]",
+        f"    temperature:   {gen.get('temperature')}",
+        f"    max_tokens:    {gen.get('max_tokens')}",
+        "",
+    ])
+
+    for i, dc in enumerate(metadata.get("data") or [], start=1):
+        lines.extend([
+            f"  [data #{i}]",
+            f"    name:          {dc.get('name')}",
+            f"    path:          {dc.get('path')}",
+            f"    max_samples:   {dc.get('max_samples') or '(all)'}",
+            f"    random_seed:   {dc.get('random_seed') or '(not set)'}",
+            "",
+        ])
+
+    defenses = metadata.get("defenses") or []
+    if defenses:
+        for i, dc in enumerate(defenses, start=1):
+            lines.append(f"  [defense #{i}]")
+            lines.append(f"    type:          {dc.get('type')}")
+            for k, v in (dc.get("params") or {}).items():
+                lines.append(f"    {k}: {v}")
+            lines.append("")
+    else:
+        lines.extend(["  [defenses] (none)", ""])
+
+    runtime = metadata.get("defense_runtime")
+    if runtime:
+        lines.append("  [defense_runtime]")
+        for k, v in runtime.items():
+            lines.append(f"    {k}: {v}")
+        lines.append("")
+
+    lines.append("=" * 60)
+    return lines
+
+
+def log_run_metadata(config: AttackConfig, logger=None, extra: Optional[Dict] = None) -> Dict:
+    """Print and optionally persist experiment metadata at run start."""
+    metadata = build_run_metadata(config, extra=extra)
+    for line in format_run_metadata_lines(metadata):
+        print(line, flush=True)
+        if logger is not None:
+            logger.info(line)
+    return metadata
+
+
 def print_config_summary(config: AttackConfig):
     """Print all configuration parameters at the start of a run."""
     import json
