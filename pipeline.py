@@ -213,6 +213,20 @@ class GradingDefensePipeline:
         inputs = self.tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, return_tensors="pt"
         ).to(self.device)
+
+        if self.config.debug:
+            print(f"{'='*60}", flush=True)
+            print(f"[DEBUG] _generate() called", flush=True)
+            print(f"[DEBUG] messages = {__import__('json').dumps(messages, indent=2, ensure_ascii=False)}", flush=True)
+            gen_args = dict(
+                do_sample=False,
+                max_new_tokens=self.config.generation_config.max_tokens,
+                temperature=self.config.generation_config.temperature,
+            )
+            print(f"[DEBUG] generate_kwargs = {__import__('json').dumps(gen_args, indent=2)}", flush=True)
+            print(f"[DEBUG] device = {self.device}", flush=True)
+            print(f"[DEBUG] tokenized prompt length = {inputs.shape[1]} tokens", flush=True)
+
         print(f"[pipeline] Generating {self.config.generation_config.max_tokens} tokens on {self.device}...", flush=True)
         outputs = self.model.generate(
             inputs,
@@ -220,10 +234,16 @@ class GradingDefensePipeline:
             max_new_tokens=self.config.generation_config.max_tokens,
             temperature=self.config.generation_config.temperature,
         )
-        print(f"[pipeline] Done. Generated {outputs.shape[1] - inputs.shape[1]} tokens.", flush=True)
-        return self.tokenizer.batch_decode(
+        response_text = self.tokenizer.batch_decode(
             outputs[:, inputs.shape[1]:], skip_special_tokens=True
         )[0]
+        print(f"[pipeline] Done. Generated {outputs.shape[1] - inputs.shape[1]} tokens.", flush=True)
+
+        if self.config.debug:
+            print(f"[DEBUG] response = {__import__('json').dumps(response_text, indent=2, ensure_ascii=False)}", flush=True)
+            print(f"{'='*60}", flush=True)
+
+        return response_text
 
     def _generate_with_voting(self, messages: list) -> str:
         """对 SmoothLLM 类防御：生成多个扰动版本，多数投票"""

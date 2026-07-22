@@ -57,6 +57,7 @@ class AttackConfig:
     grading_template: Optional[str] = None
     defenses: Optional[List[DefenseConfig]] = None
     pipeline_mode: bool = False
+    debug: bool = False
 
 
 def parse_config(path: str) -> AttackConfig:
@@ -108,6 +109,7 @@ def parse_config(path: str) -> AttackConfig:
         defenses = [DefenseConfig(**d) for d in config_dict["defenses"]]
 
     pipeline_mode = config_dict.get("pipeline_mode", False)
+    debug = config_dict.get("debug", False)
 
     return AttackConfig(
         name=name,
@@ -120,4 +122,5 @@ def parse_config(path: str) -> AttackConfig:
         grading_template=grading_template,
         defenses=defenses,
         pipeline_mode=pipeline_mode,
+        debug=debug,
     )
