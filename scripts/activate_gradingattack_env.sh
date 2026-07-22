@@ -1,13 +1,27 @@
 #!/bin/bash
-# 在计算节点上初始化 conda 并激活 gradingattack 环境。
-# HKUST-GZ HPC II 期: module load anaconda3
+# 在计算节点 / sbatch 中初始化 conda 并激活 gradingattack 环境。
 # 用法: source scripts/activate_gradingattack_env.sh
 
+_init_module_system() {
+    for init in \
+        /etc/profile.d/modules.sh \
+        /usr/share/Modules/init/bash \
+        /hpc2ssd/softwares/module/init/bash; do
+        if [ -f "${init}" ]; then
+            # shellcheck disable=SC1090
+            source "${init}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 _init_conda_from_module() {
-    if ! command -v module >/dev/null 2>&1; then
-        return 1
+    _init_module_system || true
+
+    if command -v module >/dev/null 2>&1; then
+        module load anaconda3 2>/dev/null || true
     fi
-    module load anaconda3 2>/dev/null || return 1
 
     local conda_exe conda_base
     conda_exe="$(command -v conda 2>/dev/null || true)"
@@ -32,6 +46,13 @@ _activate_conda() {
         return 0
     fi
 
+    # HKUST HPC 常见 anaconda 安装路径（batch 节点 module 不可用时的兜底）
+    if [ -f /hpc2ssd/softwares/anaconda3/etc/profile.d/conda.sh ]; then
+        # shellcheck disable=SC1091
+        source /hpc2ssd/softwares/anaconda3/etc/profile.d/conda.sh
+        return 0
+    fi
+
     for candidate in \
         "${HOME}/miniconda3/etc/profile.d/conda.sh" \
         "${HOME}/anaconda3/etc/profile.d/conda.sh" \
@@ -50,7 +71,7 @@ _activate_conda() {
 if ! _activate_conda; then
     echo "[env] conda not found. Try:" >&2
     echo "      module load anaconda3" >&2
-    echo "      source \"\$(dirname \"\$(dirname \"\$(which conda)\")\")/etc/profile.d/conda.sh\"" >&2
+    echo "      source /hpc2ssd/softwares/anaconda3/etc/profile.d/conda.sh" >&2
     echo "      conda activate gradingattack" >&2
     return 1 2>/dev/null || exit 1
 fi
