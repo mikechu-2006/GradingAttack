@@ -74,6 +74,8 @@ def _parse_grade(response: str, nclass: int) -> Optional[int]:
     2-class: correct/0→0, incorrect/1→1
     3-class: correct/0→0, contradictory/1→1, incorrect/2→2
     """
+    if not response:
+        return None
     grade = extract_grade(response)
     if grade is None:
         return None

@@ -4,11 +4,14 @@ Prompt 语义分段 + attention 权重统计。
 将评分 prompt 按 6 个 segment 切分，统计模型在预测位置对各段的 attention 分布。
 """
 
+import math
 import re
 import sys
 import torch
 from collections import defaultdict
 from typing import List, Dict, Optional, Tuple
+
+import pandas as pd
 
 
 def _safe_bar(n: int, width: int) -> str:
@@ -286,3 +289,140 @@ def print_average_attention(summaries: list, label: str = "[AVERAGE]"):
             bar = _safe_bar(n_bar, 40)
             print(f"  {seg_name:>14s}  |{bar}| {avg:.4f}", flush=True)
         print(f"{'='*70}", flush=True)
+
+
+# ── 跨样本聚合 / student+suffix 统计 ────────────────────
+
+def compute_student_suffix_stats(summaries: list) -> dict:
+    """对 attacked summaries 计算 student+suffix 合并 attention 的 mean/std/min/max。
+
+    Returns dict with keys "last_layer" and "last_3_avg", each containing
+    {"mean", "std", "min", "max", "n"}.
+    """
+    result = {}
+    for layer_name in ["last_layer", "last_3_avg"]:
+        values = []
+        for s in summaries:
+            w = s.get(layer_name)
+            if not w:
+                continue
+            combined = w.get("student", 0.0) + w.get("suffix", 0.0)
+            values.append(combined)
+        if not values:
+            result[layer_name] = {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "n": 0}
+            continue
+        arr = values
+        mean = sum(arr) / len(arr)
+        variance = sum((x - mean) ** 2 for x in arr) / len(arr)
+        std = math.sqrt(variance)
+        result[layer_name] = {
+            "mean": mean,
+            "std": std,
+            "min": min(arr),
+            "max": max(arr),
+            "n": len(arr),
+        }
+    return result
+
+
+def compute_student_stats(summaries: list) -> dict:
+    """对 clean summaries 计算 student segment attention 的 mean/std/min/max。
+
+    Returns dict with keys "last_layer" and "last_3_avg", each containing
+    {"mean", "std", "min", "max", "n"}.
+    """
+    result = {}
+    for layer_name in ["last_layer", "last_3_avg"]:
+        values = []
+        for s in summaries:
+            w = s.get(layer_name)
+            if not w:
+                continue
+            values.append(w.get("student", 0.0))
+        if not values:
+            result[layer_name] = {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "n": 0}
+            continue
+        mean = sum(values) / len(values)
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
+        std = math.sqrt(variance)
+        result[layer_name] = {
+            "mean": mean,
+            "std": std,
+            "min": min(values),
+            "max": max(values),
+            "n": len(values),
+        }
+    return result
+
+
+def print_clean_attention_stats(clean_summaries: list, label: str = "[CLEAN]"):
+    """打印 clean 的 per-segment 平均 + student attention 统计。"""
+    if not clean_summaries:
+        return
+    print_average_attention(clean_summaries, label=label)
+    stats = compute_student_stats(clean_summaries)
+    for layer_name in ["last_layer", "last_3_avg"]:
+        st = stats[layer_name]
+        layer_label = "last layer" if layer_name == "last_layer" else "last 3 avg"
+        print(f"\n  [STUDENT] {label}  —  {layer_label}  (n={st['n']})", flush=True)
+        print(f"    mean={st['mean']:.4f}  std={st['std']:.4f}  "
+              f"min={st['min']:.4f}  max={st['max']:.4f}", flush=True)
+    print(f"{'='*70}", flush=True)
+
+
+def print_attacked_attention_stats(attacked_summaries: list, label: str = "[ATTACKED]"):
+    """打印 attacked 的 per-segment 平均 + student+suffix 合并统计。"""
+    if not attacked_summaries:
+        return
+    print_average_attention(attacked_summaries, label=label)
+    stats = compute_student_suffix_stats(attacked_summaries)
+    for layer_name in ["last_layer", "last_3_avg"]:
+        st = stats[layer_name]
+        layer_label = "last layer" if layer_name == "last_layer" else "last 3 avg"
+        print(f"\n  [STUDENT+SUFFIX] {label}  —  {layer_label}  (n={st['n']})", flush=True)
+        print(f"    mean={st['mean']:.4f}  std={st['std']:.4f}  "
+              f"min={st['min']:.4f}  max={st['max']:.4f}", flush=True)
+    print(f"{'='*70}", flush=True)
+
+
+def build_attention_dataframe(clean_summaries: list,
+                               attacked_summaries: list,
+                               dataset_name: str,
+                               layer_name: str = "last_layer") -> pd.DataFrame:
+    """将 clean/attacked summaries 转为扁平 DataFrame，一行一个 sample。
+
+    列: dataset, sample_idx, type, instruction, question, solution,
+         student, suffix, markup, student_suffix
+    """
+    rows = []
+    for i, s in enumerate(clean_summaries):
+        w = s.get(layer_name, {})
+        row = {
+            "dataset": dataset_name,
+            "sample_idx": i,
+            "type": "clean",
+            "instruction": w.get("instruction", 0.0),
+            "question": w.get("question", 0.0),
+            "solution": w.get("solution", 0.0),
+            "student": w.get("student", 0.0),
+            "suffix": w.get("suffix", 0.0),
+            "markup": w.get("markup", 0.0),
+        }
+        row["student_suffix"] = row["student"] + row["suffix"]
+        rows.append(row)
+    for i, s in enumerate(attacked_summaries):
+        w = s.get(layer_name, {})
+        row = {
+            "dataset": dataset_name,
+            "sample_idx": i,
+            "type": "attacked",
+            "instruction": w.get("instruction", 0.0),
+            "question": w.get("question", 0.0),
+            "solution": w.get("solution", 0.0),
+            "student": w.get("student", 0.0),
+            "suffix": w.get("suffix", 0.0),
+            "markup": w.get("markup", 0.0),
+        }
+        row["student_suffix"] = row["student"] + row["suffix"]
+        rows.append(row)
+    return pd.DataFrame(rows)
