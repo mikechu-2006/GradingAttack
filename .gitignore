@@ -3,6 +3,10 @@ logs_defense/
 result/
 result_defense/
 configs/generated/
+output_*.txt
+err_*.txt
+output_grid_*.txt
+err_grid_*.txt
 __pycache__/
 *.pyc
 models/
