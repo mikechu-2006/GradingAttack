@@ -284,7 +284,6 @@ class GradingDefensePipeline:
                                     hook_removers = self._install_defense_hooks(
                                         prompt, attack_suffix
                                     )
-                                else:
                                     try:
                                         defended_original_resp = self._generate_with_voting(
                                             [{"role": "user", "content": prompt}]
