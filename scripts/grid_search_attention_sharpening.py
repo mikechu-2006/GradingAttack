@@ -32,7 +32,7 @@ BASE_CONFIG: Dict[str, Any] = {
     "method": "RolePlay",
     "pipeline_mode": True,
     "debug": False,
-    "nclass": 3,
+    "nclass": 2,
     "template": "ci",
     "params": {
         "adv_prompt": (
@@ -94,8 +94,8 @@ def layers_slug(label: str) -> str:
 def config_name(phase: str, temperature: float, layer_label: str) -> str:
     t_str = f"{temperature:.1f}".replace(".", "")
     if phase == "tune":
-        return f"RolePlay-AS-grid-tune-T{t_str}-{layer_label}"
-    return f"RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-best"
+        return f"RolePlay-AS-grid-tune-2c-T{t_str}-{layer_label}"
+    return "RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-best-2c"
 
 
 def build_config(
@@ -263,7 +263,7 @@ def run_full(best: Dict[str, Any], out_dir: Path, summary_dir: Path) -> Dict[str
     cfg["name"] = config_name("full", temp, layer_label)
     cfg_path = write_config(cfg, out_dir)
     best_cluster = REPO_ROOT / "configs" / (
-        "RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-best.yaml"
+        "RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-best-2c.yaml"
     )
     with open(best_cluster, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
