@@ -6,6 +6,6 @@
 #SBATCH --gres=gpu:1
 #SBATCH -t 7-00:00:00
 
-# 兼容入口 → 统一脚本（仅 Hijacking Suppression）
-export DEFENSE_TYPE=hijacking_suppression
-exec bash run_pipeline_roleplay_defense_grid_search.sh
+# 兼容入口 → run_pipeline_hijacking_suppression.sh（调参 + 全量）
+echo "[sbatch-hs] job=${SLURM_JOB_ID:-unknown} (compat → hs-pipeline) $(date -Iseconds)"
+exec bash run_pipeline_hijacking_suppression.sh

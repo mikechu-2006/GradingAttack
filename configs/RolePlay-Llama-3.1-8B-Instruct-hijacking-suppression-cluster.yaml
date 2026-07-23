@@ -1,4 +1,7 @@
 name: RolePlay-Llama-3.1-8B-Instruct-hijacking-suppression-2c
+# 默认参数（固定 beta/layers）。推荐先用 grid search 调参:
+#   sbatch run_pipeline_hijacking_suppression.sh
+# 最优配置会写入 RolePlay-...-hijacking-suppression-best-2c.yaml
 
 method: RolePlay
 pipeline_mode: true
