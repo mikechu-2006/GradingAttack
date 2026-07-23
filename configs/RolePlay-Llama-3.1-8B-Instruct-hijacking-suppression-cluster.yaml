@@ -3,6 +3,7 @@ name: RolePlay-Llama-3.1-8B-Instruct-hijacking-suppression-2c
 method: RolePlay
 pipeline_mode: true
 debug: false
+log_attention: true
 nclass: 2
 template: ci
 

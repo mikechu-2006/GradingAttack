@@ -45,6 +45,7 @@ SHARED_BASE: Dict[str, Any] = {
     "method": "RolePlay",
     "pipeline_mode": True,
     "debug": False,
+    "log_attention": True,
     "nclass": 2,
     "template": "ci",
     "params": {

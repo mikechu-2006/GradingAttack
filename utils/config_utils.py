@@ -58,6 +58,7 @@ class AttackConfig:
     defenses: Optional[List[DefenseConfig]] = None
     pipeline_mode: bool = False
     debug: bool = False
+    log_attention: bool = False
     nclass: int = 3
 
 
@@ -112,6 +113,7 @@ def parse_config(path: str) -> AttackConfig:
 
     pipeline_mode = config_dict.get("pipeline_mode", False)
     debug = config_dict.get("debug", False)
+    log_attention = config_dict.get("log_attention", False)
 
     return AttackConfig(
         name=name,
@@ -125,6 +127,7 @@ def parse_config(path: str) -> AttackConfig:
         defenses=defenses,
         pipeline_mode=pipeline_mode,
         debug=debug,
+        log_attention=log_attention,
         nclass=nclass,
     )
 
@@ -164,6 +167,7 @@ def build_run_metadata(config: AttackConfig, extra: Optional[Dict] = None) -> Di
         "model_id": mc.model_id,
         "template": getattr(config, "template", "ci"),
         "nclass": config.nclass,
+        "log_attention": config.log_attention,
         "generation": gc.as_dict(),
         "data": [asdict(dc) for dc in config.data_config],
         "params": config.params or {},
@@ -190,6 +194,7 @@ def format_run_metadata_lines(metadata: Dict) -> List[str]:
         f"  model_id:      {metadata.get('model_id') or '(not set)'}",
         f"  template:      {metadata.get('template')}",
         f"  nclass:        {metadata.get('nclass')}",
+        f"  log_attention: {metadata.get('log_attention')}",
         "",
     ]
 
@@ -253,6 +258,7 @@ def print_config_summary(config: AttackConfig):
     print(f"  attack_method:   {config.attack_method}", flush=True)
     print(f"  pipeline_mode:   {config.pipeline_mode}", flush=True)
     print(f"  debug:           {config.debug}", flush=True)
+    print(f"  log_attention:   {config.log_attention}", flush=True)
     print(f"  nclass:          {config.nclass}-class", flush=True)
     print(f"", flush=True)
 
