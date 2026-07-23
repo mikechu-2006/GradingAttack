@@ -83,7 +83,7 @@ LAYER_GRID: List[Tuple[str, Union[str, List[int]]]] = [
 ]
 
 TUNE_SAMPLES = 50
-FULL_SAMPLES = 300
+FULL_SAMPLES = 100
 QWK_PENALTY = 0.5
 
 

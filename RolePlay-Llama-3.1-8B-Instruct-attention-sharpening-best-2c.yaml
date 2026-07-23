@@ -16,7 +16,7 @@ model:
 data:
   - name: scientsbank
     path: ./dataset/scientsbank.jsonl
-    max_samples: 300
+    max_samples: 100
     random_seed: 42
 
 generation:
