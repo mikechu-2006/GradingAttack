@@ -43,6 +43,15 @@ fi
 
 echo "[cluster-hs] python=${PYTHON}"
 echo "[cluster-hs] version=$("${PYTHON}" --version 2>&1)"
-echo "[cluster-hs] config=RolePlay-Llama-3.1-8B-Instruct-hijacking-suppression-cluster.yaml"
 
-exec "${PYTHON}" main.py --pipeline configs/RolePlay-Llama-3.1-8B-Instruct-hijacking-suppression-cluster.yaml
+CONFIG="configs/RolePlay-Llama-3.1-8B-Instruct-hijacking-suppression-cluster.yaml"
+BEST="configs/RolePlay-Llama-3.1-8B-Instruct-hijacking-suppression-best-2c.yaml"
+if [ -f "${BEST}" ]; then
+    CONFIG="${BEST}"
+    echo "[cluster-hs] using grid-search best config: ${CONFIG}"
+else
+    echo "[cluster-hs] using default cluster config: ${CONFIG}"
+    echo "[cluster-hs] tip: run sbatch run_pipeline_hijacking_suppression.sh for tune→full"
+fi
+
+exec "${PYTHON}" main.py --pipeline "${CONFIG}"
