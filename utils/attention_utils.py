@@ -388,12 +388,15 @@ def print_attacked_attention_stats(attacked_summaries: list, label: str = "[ATTA
 def build_attention_dataframe(clean_summaries: list,
                                attacked_summaries: list,
                                dataset_name: str,
+                               results: list = None,
                                layer_name: str = "last_layer") -> pd.DataFrame:
     """将 clean/attacked summaries 转为扁平 DataFrame，一行一个 sample。
 
-    列: dataset, sample_idx, type, instruction, question, solution,
-         student, suffix, markup, student_suffix
+    列: dataset, sample_idx, type, verification, pred_clean, pred_attacked,
+         instruction, question, solution, student, suffix, markup, student_suffix
     """
+    from utils.data_utils import extract_grade
+
     rows = []
     for i, s in enumerate(clean_summaries):
         w = s.get(layer_name, {})
@@ -401,6 +404,8 @@ def build_attention_dataframe(clean_summaries: list,
             "dataset": dataset_name,
             "sample_idx": i,
             "type": "clean",
+            "verification": None,
+            "pred": None,
             "instruction": w.get("instruction", 0.0),
             "question": w.get("question", 0.0),
             "solution": w.get("solution", 0.0),
@@ -408,6 +413,10 @@ def build_attention_dataframe(clean_summaries: list,
             "suffix": w.get("suffix", 0.0),
             "markup": w.get("markup", 0.0),
         }
+        if results and i < len(results):
+            r = results[i]
+            row["verification"] = (r.get("student_qa_data") or {}).get("verification")
+            row["pred"] = extract_grade(r.get("original_response") or "")
         row["student_suffix"] = row["student"] + row["suffix"]
         rows.append(row)
     for i, s in enumerate(attacked_summaries):
@@ -416,6 +425,8 @@ def build_attention_dataframe(clean_summaries: list,
             "dataset": dataset_name,
             "sample_idx": i,
             "type": "attacked",
+            "verification": None,
+            "pred": None,
             "instruction": w.get("instruction", 0.0),
             "question": w.get("question", 0.0),
             "solution": w.get("solution", 0.0),
@@ -423,6 +434,10 @@ def build_attention_dataframe(clean_summaries: list,
             "suffix": w.get("suffix", 0.0),
             "markup": w.get("markup", 0.0),
         }
+        if results and i < len(results):
+            r = results[i]
+            row["verification"] = (r.get("student_qa_data") or {}).get("verification")
+            row["pred"] = extract_grade(r.get("attacked_response") or "")
         row["student_suffix"] = row["student"] + row["suffix"]
         rows.append(row)
     return pd.DataFrame(rows)

@@ -25,9 +25,10 @@ def _load_pipeline_model(model_path: str, device: str, config: AttackConfig):
     from transformers import AutoModelForCausalLM
 
     kwargs = dict(trust_remote_code=True, torch_dtype=torch.bfloat16)
-    if _has_attention_sharpening(config):
+    if _has_attention_sharpening(config) or config.debug:
         kwargs["attn_implementation"] = "eager"
-        print("[grading_attack] Using attn_implementation=eager for Attention Sharpening", flush=True)
+        reason = "Attention Sharpening" if _has_attention_sharpening(config) else "debug (attention analysis)"
+        print(f"[grading_attack] Using attn_implementation=eager for {reason}", flush=True)
     model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
     return model.to(device)
 

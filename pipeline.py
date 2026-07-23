@@ -77,6 +77,7 @@ class GradingDefensePipeline:
             }
         log_extra = {"defense_runtime": defense_runtime} if defense_runtime else None
         run_metadata = build_run_metadata(config, extra=log_extra)
+        self.run_metadata = run_metadata
         for line in format_run_metadata_lines(run_metadata):
             print(line, flush=True)
             logger.info(line)
@@ -167,7 +168,12 @@ class GradingDefensePipeline:
                         print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
                     elif config.attack_method.lower() == "roleplay":
                         attack_suffix = config.params["adv_prompt"]
-                        attacked_messages[0]["content"] = prompt + attack_suffix
+                        end_tag = "</student_answer>"
+                        insert_pos = prompt.rfind(end_tag)
+                        if insert_pos != -1:
+                            attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
+                        else:
+                            attacked_messages[0]["content"] = prompt + attack_suffix
 
                     if config.debug:
                         from utils.attention_utils import analyze_prompt_attention
@@ -213,6 +219,15 @@ class GradingDefensePipeline:
                                     )
                                     # 将 attack_suffix 用与 Step 2 同样的规则插入 defended_prompt
                                     if config.attack_method.lower() == "gcg":
+                                        defended_insert_pos = defended_prompt.rfind(end_tag)
+                                        if defended_insert_pos != -1:
+                                            defended_attacked_content = (
+                                                defended_prompt[:defended_insert_pos]
+                                                + attack_suffix + end_tag
+                                            )
+                                        else:
+                                            defended_attacked_content = defended_prompt + attack_suffix
+                                    elif config.attack_method.lower() == "roleplay":
                                         defended_insert_pos = defended_prompt.rfind(end_tag)
                                         if defended_insert_pos != -1:
                                             defended_attacked_content = (
@@ -278,7 +293,8 @@ class GradingDefensePipeline:
                     print_attacked_attention_stats(attacked_attn_summaries, label=atk_label)
                 df = build_attention_dataframe(clean_attn_summaries,
                                                attacked_attn_summaries,
-                                               data_config.name)
+                                               data_config.name,
+                                               results=all_results)
                 all_attn_dfs.append(df)
 
             # ── Step 5: 计算指标 ──
@@ -376,6 +392,13 @@ class GradingDefensePipeline:
             combined_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
             print(f"[ATTENTION] DataFrame saved to {csv_path}  ({len(combined_df)} rows)", flush=True)
             logger.info(f"Attention DataFrame saved to {csv_path}")
+
+            txt_path = os.path.splitext(logger.result_path)[0] + "_attention.txt"
+            with open(txt_path, "w", encoding="utf-8") as f:
+                for line in format_run_metadata_lines(self.run_metadata):
+                    f.write(line + "\n")
+            print(f"[ATTENTION] Experiment metadata saved to {txt_path}", flush=True)
+            logger.info(f"Experiment metadata saved to {txt_path}")
 
     def _generate(self, messages: list) -> str:
         inputs = self.tokenizer.apply_chat_template(
