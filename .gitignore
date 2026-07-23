@@ -7,6 +7,10 @@ output_*.txt
 err_*.txt
 output_grid_*.txt
 err_grid_*.txt
+output_hs_*.txt
+err_hs_*.txt
+output_grid_hs_*.txt
+err_grid_hs_*.txt
 __pycache__/
 *.pyc
 models/

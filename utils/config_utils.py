@@ -142,6 +142,16 @@ def has_attention_sharpening(config: AttackConfig) -> bool:
     )
 
 
+def needs_eager_attention(config: AttackConfig) -> bool:
+    if not config.defenses:
+        return False
+    eager_types = {"attentionsharpening", "hijackingsuppression"}
+    return any(
+        _defense_type_key(dc.type) in eager_types
+        for dc in config.defenses
+    )
+
+
 def build_run_metadata(config: AttackConfig, extra: Optional[Dict] = None) -> Dict:
     """Structured experiment metadata for metrics JSON and run logs."""
     mc = config.model_config

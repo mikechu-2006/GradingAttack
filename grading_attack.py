@@ -2,13 +2,23 @@ from baselines.roleplay.roleplay import RolePlay
 from baselines.gcg.gcg import GCG
 from baselines.defenses import (
     PerplexityFilter, SmoothLLM, SelfReminder,
-    ParaphraseDefense, AttentionSharpening, BaseDefense,
+    ParaphraseDefense, AttentionSharpening, HijackingSuppression, BaseDefense,
 )
 from utils.config_utils import AttackConfig
 
 
 def _defense_type_key(defense_type: str) -> str:
     return defense_type.lower().replace("-", "").replace("_", "")
+
+
+def _needs_eager_attention(config: AttackConfig) -> bool:
+    if not config.defenses:
+        return False
+    eager_types = {"attentionsharpening", "hijackingsuppression"}
+    return any(
+        _defense_type_key(dc.type) in eager_types
+        for dc in config.defenses
+    )
 
 
 def _has_attention_sharpening(config: AttackConfig) -> bool:
@@ -25,9 +35,9 @@ def _load_pipeline_model(model_path: str, device: str, config: AttackConfig):
     from transformers import AutoModelForCausalLM
 
     kwargs = dict(trust_remote_code=True, torch_dtype=torch.bfloat16)
-    if _has_attention_sharpening(config):
+    if _needs_eager_attention(config):
         kwargs["attn_implementation"] = "eager"
-        print("[grading_attack] Using attn_implementation=eager for Attention Sharpening", flush=True)
+        print("[grading_attack] Using attn_implementation=eager for attention hook defense", flush=True)
     model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
     return model.to(device)
 
@@ -60,6 +70,12 @@ def _build_defenses(config: AttackConfig, model=None, tokenizer=None):
         elif t == "attentionsharpening":
             defenses.append(AttentionSharpening(
                 temperature=dc.params.get("temperature", 0.5),
+                layers=dc.params.get("layers", "all"),
+            ))
+        elif t == "hijackingsuppression":
+            defenses.append(HijackingSuppression(
+                beta=dc.params.get("beta", 0.1),
+                top_fraction=dc.params.get("top_fraction", 0.01),
                 layers=dc.params.get("layers", "all"),
             ))
         else:

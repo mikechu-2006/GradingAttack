@@ -22,7 +22,7 @@ from utils.config_utils import (
     print_config_summary,
     build_run_metadata,
     format_run_metadata_lines,
-    has_attention_sharpening,
+    needs_eager_attention,
 )
 
 
@@ -63,6 +63,37 @@ class GradingDefensePipeline:
         # 检查是否有 SmoothLLM 类需要多次推理的防御
         self.multi_gen_defenses = [d for d in self.defenses
                                    if d.requires_multiple_generations()]
+        self.context_aware_defenses = any(
+            d.requires_inference_context() for d in self.defenses
+        )
+
+    def _install_defense_hooks(self, prompt_content: str, attack_suffix: str) -> list:
+        removers = []
+        for d in self.defenses:
+            if d.requires_inference_context():
+                d.set_inference_context(
+                    self.tokenizer, prompt_content, attack_suffix
+                )
+            if d.requires_model_hooks():
+                removers.extend(d.install_model_hooks(self.model))
+        return removers
+
+    @staticmethod
+    def _remove_defense_hooks(removers: list) -> None:
+        for remove in removers:
+            remove()
+
+    def _generate_with_defense_hooks(
+        self,
+        messages: list,
+        prompt_content: str,
+        attack_suffix: str,
+    ) -> str:
+        removers = self._install_defense_hooks(prompt_content, attack_suffix)
+        try:
+            return self._generate(messages)
+        finally:
+            self._remove_defense_hooks(removers)
 
     def run(self):
         config = self.config
@@ -73,7 +104,7 @@ class GradingDefensePipeline:
             defense_runtime = {
                 "sharpen_clean": True,
                 "sharpen_attacked": True,
-                "attn_implementation": "eager" if has_attention_sharpening(config) else "default",
+                "attn_implementation": "eager" if needs_eager_attention(config) else "default",
             }
         log_extra = {"defense_runtime": defense_runtime} if defense_runtime else None
         run_metadata = build_run_metadata(config, extra=log_extra)
@@ -187,56 +218,91 @@ class GradingDefensePipeline:
                     rejected = False
 
                     if self.defenses:
-                        hook_removers = []
-                        for d in self.defenses:
-                            if d.requires_model_hooks():
-                                hook_removers.extend(d.install_model_hooks(self.model))
-
                         try:
-                            try:
-                                # 对有多次推理需求的 defense 做批量扰动+投票
-                                if self.multi_gen_defenses:
-                                    defended_original_resp = self._generate_with_voting(
-                                        [{"role": "user", "content": prompt}]
+                            if self.multi_gen_defenses:
+                                if self.context_aware_defenses:
+                                    defended_original_resp = self._generate_with_defense_hooks(
+                                        [{"role": "user", "content": prompt}],
+                                        prompt,
+                                        "",
                                     )
-                                    defended_attacked_resp = self._generate_with_voting(
-                                        attacked_messages
+                                    defended_attacked_resp = self._generate_with_defense_hooks(
+                                        attacked_messages,
+                                        attacked_messages[0]["content"],
+                                        attack_suffix,
                                     )
                                 else:
-                                    # pre_process 单次
-                                    defended_prompt = prompt
-                                    for d in self.defenses:
-                                        defended_prompt = d.pre_process(defended_prompt)
-
-                                    defended_original_resp = self._generate(
-                                        [{"role": "user", "content": defended_prompt}]
+                                    hook_removers = self._install_defense_hooks(
+                                        prompt, attack_suffix
                                     )
-                                    # 将 attack_suffix 用与 Step 2 同样的规则插入 defended_prompt
-                                    if config.attack_method.lower() == "gcg":
-                                        defended_insert_pos = defended_prompt.rfind(end_tag)
-                                        if defended_insert_pos != -1:
-                                            defended_attacked_content = (
-                                                defended_prompt[:defended_insert_pos]
-                                                + attack_suffix + end_tag
-                                            )
-                                        else:
-                                            defended_attacked_content = defended_prompt + attack_suffix
+                                    try:
+                                        defended_original_resp = self._generate_with_voting(
+                                            [{"role": "user", "content": prompt}]
+                                        )
+                                        defended_attacked_resp = self._generate_with_voting(
+                                            attacked_messages
+                                        )
+                                    finally:
+                                        self._remove_defense_hooks(hook_removers)
+                                for d in self.defenses:
+                                    defended_original_resp = d.post_process(
+                                        defended_original_resp or ""
+                                    )
+                                    defended_attacked_resp = d.post_process(
+                                        defended_attacked_resp or ""
+                                    )
+                            else:
+                                defended_prompt = prompt
+                                for d in self.defenses:
+                                    defended_prompt = d.pre_process(defended_prompt)
+
+                                if config.attack_method.lower() == "gcg":
+                                    defended_insert_pos = defended_prompt.rfind(end_tag)
+                                    if defended_insert_pos != -1:
+                                        defended_attacked_content = (
+                                            defended_prompt[:defended_insert_pos]
+                                            + attack_suffix + end_tag
+                                        )
                                     else:
                                         defended_attacked_content = defended_prompt + attack_suffix
-                                    defended_attacked_resp = self._generate(
-                                        [{"role": "user", "content": defended_attacked_content}]
+                                else:
+                                    defended_attacked_content = defended_prompt + attack_suffix
+
+                                if self.context_aware_defenses:
+                                    defended_original_resp = self._generate_with_defense_hooks(
+                                        [{"role": "user", "content": defended_prompt}],
+                                        defended_prompt,
+                                        "",
+                                    )
+                                    defended_attacked_resp = self._generate_with_defense_hooks(
+                                        [{"role": "user", "content": defended_attacked_content}],
+                                        defended_attacked_content,
+                                        attack_suffix,
+                                    )
+                                else:
+                                    hook_removers = self._install_defense_hooks(
+                                        defended_prompt, attack_suffix
+                                    )
+                                    try:
+                                        defended_original_resp = self._generate(
+                                            [{"role": "user", "content": defended_prompt}]
+                                        )
+                                        defended_attacked_resp = self._generate(
+                                            [{"role": "user", "content": defended_attacked_content}]
+                                        )
+                                    finally:
+                                        self._remove_defense_hooks(hook_removers)
+
+                                for d in self.defenses:
+                                    defended_original_resp = d.post_process(
+                                        defended_original_resp or ""
+                                    )
+                                    defended_attacked_resp = d.post_process(
+                                        defended_attacked_resp or ""
                                     )
 
-                                # post_process
-                                for d in self.defenses:
-                                    defended_original_resp = d.post_process(defended_original_resp or "")
-                                    defended_attacked_resp = d.post_process(defended_attacked_resp or "")
-
-                            except DefenseRejectException:
-                                rejected = True
-                        finally:
-                            for remove in hook_removers:
-                                remove()
+                        except DefenseRejectException:
+                            rejected = True
 
                     # ── Step 4: 记录结果 ──
                     result = AttackResult(
