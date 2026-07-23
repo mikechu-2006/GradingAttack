@@ -2,6 +2,8 @@
 
 This document summarizes the current RolePlay attack and defense experiments for automatic short-answer grading (ASAG).
 
+Generated comparison artifacts are available in igures/roleplay_defense_summary.csv and igures/roleplay_defense_comparison.svg.
+
 ## Setup
 
 - **Task:** Automatic Short Answer Grading under prompt-level attack.
