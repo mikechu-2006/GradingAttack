@@ -1,14 +1,24 @@
-from baselines.roleplay.roleplay import RolePlay
-from baselines.gcg.gcg import GCG
 from baselines.defenses import (
     PerplexityFilter, SmoothLLM, SelfReminder,
-    ParaphraseDefense, AttentionSharpening, BaseDefense,
+    ParaphraseDefense, AttentionSharpening, HijackingSuppression, BaseDefense,
 )
 from utils.config_utils import AttackConfig
 
 
 def _defense_type_key(defense_type: str) -> str:
     return defense_type.lower().replace("-", "").replace("_", "")
+
+
+def _needs_eager_attention(config: AttackConfig) -> bool:
+    if config.debug:
+        return True
+    if not config.defenses:
+        return False
+    eager_types = {"attentionsharpening", "hijackingsuppression"}
+    return any(
+        _defense_type_key(dc.type) in eager_types
+        for dc in config.defenses
+    )
 
 
 def _has_attention_sharpening(config: AttackConfig) -> bool:
@@ -25,10 +35,12 @@ def _load_pipeline_model(model_path: str, device: str, config: AttackConfig):
     from transformers import AutoModelForCausalLM
 
     kwargs = dict(trust_remote_code=True, torch_dtype=torch.bfloat16)
-    if _has_attention_sharpening(config) or config.debug:
+    if _needs_eager_attention(config):
         kwargs["attn_implementation"] = "eager"
-        reason = "Attention Sharpening" if _has_attention_sharpening(config) else "debug (attention analysis)"
-        print(f"[grading_attack] Using attn_implementation=eager for {reason}", flush=True)
+        if config.debug:
+            print("[grading_attack] Using attn_implementation=eager for debug (attention analysis)", flush=True)
+        else:
+            print("[grading_attack] Using attn_implementation=eager for attention hook defense", flush=True)
     model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
     return model.to(device)
 
@@ -63,6 +75,12 @@ def _build_defenses(config: AttackConfig, model=None, tokenizer=None):
                 temperature=dc.params.get("temperature", 0.5),
                 layers=dc.params.get("layers", "all"),
             ))
+        elif t == "hijackingsuppression":
+            defenses.append(HijackingSuppression(
+                beta=dc.params.get("beta", 0.1),
+                top_fraction=dc.params.get("top_fraction", 0.01),
+                layers=dc.params.get("layers", "all"),
+            ))
         else:
             raise ValueError(f"Unknown defense type: {dc.type}")
     return defenses
@@ -75,8 +93,10 @@ class GradingAttack:
             # pipeline 模式: 在 pipeline.py 中统一处理
             self.attack = None
         elif config.attack_method.lower() == "gcg":
+            from baselines.gcg.gcg import GCG
             self.attack = GCG(config)
         elif config.attack_method.lower() == "roleplay":
+            from baselines.roleplay.roleplay import RolePlay
             self.attack = RolePlay(config)
         else:
             raise ValueError(f"Not supported attack method {config.attack_method}")

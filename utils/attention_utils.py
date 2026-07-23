@@ -95,13 +95,25 @@ def _char_ranges(prompt: str, gcg_suffix: str) -> Dict[str, Tuple[int, int]]:
     if sa_close:
         ranges["trailing"] = (sa_close[1], len(prompt))
 
-    # GCG suffix 拆分
+    # GCG suffix 拆分（嵌在 student_answer 内）
     if gcg_suffix and "student" in ranges:
         s_start, s_end = ranges["student"]
         suffix_pos = prompt.find(gcg_suffix, s_start, s_end)
         if suffix_pos != -1:
             ranges["student"] = (s_start, suffix_pos)
-            ranges["suffix"]  = (suffix_pos, suffix_pos + len(gcg_suffix))
+            ranges["suffix"] = (suffix_pos, suffix_pos + len(gcg_suffix))
+
+    # RolePlay / 尾部 suffix（在 </student_answer> 之后）
+    if gcg_suffix and "suffix" not in ranges:
+        suffix_pos = prompt.find(gcg_suffix)
+        if suffix_pos != -1:
+            sa_close = ranges.get("student_close")
+            if sa_close is None or suffix_pos >= sa_close[1]:
+                ranges["suffix"] = (suffix_pos, suffix_pos + len(gcg_suffix))
+                if "trailing" in ranges:
+                    t_start, t_end = ranges["trailing"]
+                    if suffix_pos > t_start:
+                        ranges["trailing"] = (t_start, suffix_pos)
 
     return ranges
 
@@ -136,12 +148,40 @@ def _order_segments(ranges: dict, gcg_suffix: str) -> List[str]:
 
 # ── attention 分析 ───────────────────────────────────────
 
+def _build_token_position_weights(
+    attn_row: torch.Tensor,
+    token_to_seg: List[str],
+    tokenizer,
+    input_ids: torch.Tensor,
+) -> List[Dict[str, object]]:
+    """最后一个预测 token 对各 token 位置的 attention 权重。"""
+    n = min(len(token_to_seg), attn_row.shape[0])
+    positions: List[Dict[str, object]] = []
+    ids = input_ids[0].tolist() if input_ids.dim() > 1 else input_ids.tolist()
+    for pos in range(n):
+        tok_id = ids[pos] if pos < len(ids) else None
+        tok_str = ""
+        if tok_id is not None:
+            tok_str = tokenizer.decode([tok_id], skip_special_tokens=False)
+            tok_str = tok_str.replace("\n", "\\n").replace("\r", "\\r")
+            if len(tok_str) > 24:
+                tok_str = tok_str[:21] + "..."
+        positions.append({
+            "pos": pos,
+            "segment": token_to_seg[pos],
+            "weight": float(attn_row[pos].item()),
+            "token": tok_str,
+        })
+    return positions
+
+
 def run_attention_analysis(model, tokenizer, prompt_text: str,
                            token_to_seg: List[str],
                            ordered_segments: List[str]) -> dict:
     """前向传播并聚合最后 token 的 attention 分布。"""
     inputs = tokenizer(prompt_text, return_tensors="pt",
                        add_special_tokens=False).to(model.device)
+    input_ids = inputs["input_ids"]
 
     with torch.no_grad():
         outputs = model(**inputs, output_attentions=True)
@@ -156,18 +196,28 @@ def run_attention_analysis(model, tokenizer, prompt_text: str,
 
     # 最后一层
     last_attn = attentions[-1][0].mean(dim=0)[:n, :n]  # (S, S)
+    last_row = last_attn[n - 1, :]
     last_seg = _agg_last_token(last_attn, token_to_seg, ordered_segments)
+    last_positions = _build_token_position_weights(
+        last_row, token_to_seg, tokenizer, input_ids
+    )
 
     # 最后 3 层平均
     num_last = min(3, num_layers)
     stacked = torch.stack([
         attentions[i][0].mean(dim=0)[:n, :n] for i in range(num_layers - num_last, num_layers)
     ]).mean(dim=0)
+    last3_row = stacked[n - 1, :]
     last3_seg = _agg_last_token(stacked, token_to_seg, ordered_segments)
+    last3_positions = _build_token_position_weights(
+        last3_row, token_to_seg, tokenizer, input_ids
+    )
 
     return {
         "last_layer": last_seg,
         "last_3_avg": last3_seg,
+        "last_layer_positions": last_positions,
+        "last_3_avg_positions": last3_positions,
         "_segments": ordered_segments,
     }
 
@@ -188,74 +238,173 @@ def _agg_last_token(attn: torch.Tensor,
 
 # ── 格式化输出 ───────────────────────────────────────────
 
-def format_attention_summary(summary: dict,
-                              layers: Optional[List[str]] = None,
-                              bar_len: int = 40):
-    """打印 attention 分布柱状图。"""
+def _format_position_value_lines(
+    positions: List[Dict[str, object]],
+    *,
+    prefix: str,
+    label: str,
+    layer_label: str,
+    chunk_size: int = 32,
+) -> List[str]:
+    """逐位置 attention 数值：可读行 + 紧凑解析行。"""
+    if not positions:
+        return []
+
+    lines = [
+        f"[ATTENTION_POSITION] {prefix}{label} — {layer_label} "
+        f"(prediction → each token position, n={len(positions)})",
+    ]
+    for entry in positions:
+        lines.append(
+            f"  pos={entry['pos']:4d}  seg={entry['segment']:<12s}  "
+            f"w={entry['weight']:.6f}  tok={entry['token']!r}"
+        )
+
+    compact_parts = [
+        f"{entry['pos']}:{entry['segment']}:{entry['weight']:.6f}"
+        for entry in positions
+    ]
+    for i in range(0, len(compact_parts), chunk_size):
+        chunk = compact_parts[i:i + chunk_size]
+        lines.append(
+            f"[ATTENTION_POSITION_VALUES] {prefix}{label} {layer_label} "
+            f"chunk={i // chunk_size}: {' '.join(chunk)}"
+        )
+    return lines
+
+
+def format_attention_log_lines(summary: dict, bar_len: int = 40) -> List[str]:
+    """将 attention 分布格式化为可写入 stdout / .log 的文本行。"""
     ordered_segments = summary.get("_segments", [])
     if not ordered_segments:
-        return
+        return []
 
-    if layers is None:
-        layers = ["last_layer", "last_3_avg"]
+    label = summary.get("_label", "[ATTENTION]")
+    sample_idx = summary.get("_sample_idx")
+    prefix = f"sample={sample_idx} " if sample_idx is not None else ""
+    lines: List[str] = []
 
-    for layer_name in layers:
+    for layer_name in ["last_layer", "last_3_avg"]:
         seg_weights = summary.get(layer_name)
         if not seg_weights:
             continue
-        print(f"\n{'='*70}", flush=True)
-        print(f"  [ATTENTION] {layer_name}  —  prediction position → segments", flush=True)
-        print(f"{'='*70}", flush=True)
+        layer_label = "last_layer" if layer_name == "last_layer" else "last_3_layers_avg"
+        lines.append("=" * 70)
+        lines.append(f"[ATTENTION] {prefix}{label} — {layer_label} (prediction → segment weights)")
         for seg_name in ordered_segments:
             w = seg_weights.get(seg_name, 0.0)
             n_bar = int(w * bar_len)
             bar = _safe_bar(n_bar, bar_len)
-            print(f"  {seg_name:>14s}  |{bar}| {w:.4f}", flush=True)
-        print(f"{'='*70}", flush=True)
+            lines.append(f"  {seg_name:>14s}  |{bar}| {w:.6f}")
+        # 紧凑数值行，便于 grep / 解析
+        numeric = "  ".join(
+            f"{seg}={seg_weights.get(seg, 0.0):.6f}" for seg in ordered_segments
+        )
+        lines.append(f"[ATTENTION_VALUES] {prefix}{label} {layer_label}: {numeric}")
+
+        pos_key = "last_layer_positions" if layer_name == "last_layer" else "last_3_avg_positions"
+        position_lines = _format_position_value_lines(
+            summary.get(pos_key) or [],
+            prefix=prefix,
+            label=label,
+            layer_label=layer_label,
+        )
+        lines.extend(position_lines)
+        lines.append("=" * 70)
+    return lines
+
+
+def log_attention_summary(summary: dict, logger=None, bar_len: int = 40) -> None:
+    """打印并写入 logger 的 attention 分布。"""
+    for line in format_attention_log_lines(summary, bar_len=bar_len):
+        print(line, flush=True)
+        if logger is not None:
+            logger.info(line)
+
+
+def attention_summary_to_dict(summary: dict) -> dict:
+    """JSON 可序列化的 attention 摘要。"""
+    if not summary:
+        return {}
+    return {
+        "label": summary.get("_label"),
+        "sample_idx": summary.get("_sample_idx"),
+        "segments": summary.get("_segments", []),
+        "last_layer": dict(summary.get("last_layer") or {}),
+        "last_3_avg": dict(summary.get("last_3_avg") or {}),
+        "last_layer_positions": list(summary.get("last_layer_positions") or []),
+        "last_3_avg_positions": list(summary.get("last_3_avg_positions") or []),
+    }
+
+
+def format_attention_summary(summary: dict,
+                              layers: Optional[List[str]] = None,
+                              bar_len: int = 40):
+    """打印 attention 分布柱状图（兼容旧接口）。"""
+    log_attention_summary(summary, logger=None, bar_len=bar_len)
 
 
 # ── 顶层入口 ─────────────────────────────────────────────
 
 def analyze_prompt_attention(model, tokenizer, prompt_text: str,
                               gcg_suffix: str = "",
-                              label: str = "[ATTENTION]"):
-    """一站式 attention 分析：分段 → 前向 → 聚合 → 打印。返回 summary dict 供后续聚合。"""
+                              label: str = "[ATTENTION]",
+                              sample_idx: Optional[int] = None,
+                              logger=None,
+                              log: bool = True):
+    """分段 → 前向 → 聚合 attention；可选写入日志。返回 summary dict。"""
     token_to_seg, ordered = segment_prompt(prompt_text, tokenizer, gcg_suffix)
 
-    # 检查覆盖率
     all_markup = all(s == "markup" for s in token_to_seg)
     if all_markup:
-        print(f"[ATTENTION] WARNING: all tokens classified as markup. Segment detection may be broken.", flush=True)
+        msg = "[ATTENTION] WARNING: all tokens classified as markup. Segment detection may be broken."
+        print(msg, flush=True)
+        if logger is not None:
+            logger.info(msg)
         return None
 
     summary = run_attention_analysis(model, tokenizer, prompt_text,
                                      token_to_seg, ordered)
     summary["_label"] = label
+    if sample_idx is not None:
+        summary["_sample_idx"] = sample_idx
 
-    # 打印时带上 label
-    ordered_segments = summary.get("_segments", [])
-    if not ordered_segments:
-        return None
-
-    for layer_name in ["last_layer", "last_3_avg"]:
-        seg_weights = summary.get(layer_name)
-        if not seg_weights:
-            continue
-        layer_label = "last layer" if layer_name == "last_layer" else "last 3 avg"
-        print(f"\n{'='*70}", flush=True)
-        print(f"  [ATTENTION] {label}  —  {layer_label}", flush=True)
-        print(f"{'='*70}", flush=True)
-        for seg_name in ordered_segments:
-            w = seg_weights.get(seg_name, 0.0)
-            n_bar = int(w * 40)
-            bar = _safe_bar(n_bar, 40)
-            print(f"  {seg_name:>14s}  |{bar}| {w:.4f}", flush=True)
-        print(f"{'='*70}", flush=True)
+    if log:
+        log_attention_summary(summary, logger=logger)
 
     return summary
 
 
 # ── 跨样本聚合 ─────────────────────────────────────────
+
+def format_attention_aggregate_lines(summaries: list, label: str) -> List[str]:
+    """返回数据集级 segment attention 均值文本行（写入 .log）。"""
+    if not summaries:
+        return []
+    ordered_segments = summaries[0].get("_segments", [])
+    if not ordered_segments:
+        return []
+
+    lines = [f"[ATTENTION_AVG] {label} (n={len(summaries)})"]
+    for layer_name in ["last_layer", "last_3_avg"]:
+        accum = {seg: 0.0 for seg in ordered_segments}
+        count = 0
+        for s in summaries:
+            seg_weights = s.get(layer_name)
+            if not seg_weights:
+                continue
+            count += 1
+            for seg in ordered_segments:
+                accum[seg] += seg_weights.get(seg, 0.0)
+        if count == 0:
+            continue
+        layer_label = "last_layer" if layer_name == "last_layer" else "last_3_layers_avg"
+        numeric = "  ".join(
+            f"{seg}={accum[seg] / count:.6f}" for seg in ordered_segments
+        )
+        lines.append(f"[ATTENTION_AVG_VALUES] {label} {layer_label}: {numeric}")
+    return lines
+
 
 def print_average_attention(summaries: list, label: str = "[AVERAGE]"):
     """对多个样本的 attention summary 求平均并打印。"""
@@ -392,7 +541,7 @@ def build_attention_dataframe(clean_summaries: list,
                                layer_name: str = "last_layer") -> pd.DataFrame:
     """将 clean/attacked summaries 转为扁平 DataFrame，一行一个 sample。
 
-    列: dataset, sample_idx, type, verification, pred_clean, pred_attacked,
+    列: dataset, sample_idx, type, verification, pred,
          instruction, question, solution, student, suffix, markup, student_suffix
     """
     from utils.data_utils import extract_grade

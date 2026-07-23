@@ -22,7 +22,7 @@ from utils.config_utils import (
     print_config_summary,
     build_run_metadata,
     format_run_metadata_lines,
-    has_attention_sharpening,
+    needs_eager_attention,
 )
 
 
@@ -63,6 +63,73 @@ class GradingDefensePipeline:
         # 检查是否有 SmoothLLM 类需要多次推理的防御
         self.multi_gen_defenses = [d for d in self.defenses
                                    if d.requires_multiple_generations()]
+        self.context_aware_defenses = any(
+            d.requires_inference_context() for d in self.defenses
+        )
+
+    def _should_log_attention(self) -> bool:
+        return self.config.debug or self.config.log_attention
+
+    def _analyze_attention(
+        self,
+        prompt_text: str,
+        label: str,
+        logger: GradingAttackLogger,
+        gcg_suffix: str = "",
+        sample_idx: Optional[int] = None,
+        with_defense_hooks: bool = False,
+        hook_prompt_content: str = "",
+        hook_attack_suffix: str = "",
+    ):
+        removers = []
+        if with_defense_hooks and self.defenses:
+            removers = self._install_defense_hooks(
+                hook_prompt_content or prompt_text,
+                hook_attack_suffix,
+            )
+        try:
+            from utils.attention_utils import analyze_prompt_attention
+            return analyze_prompt_attention(
+                self.model,
+                self.tokenizer,
+                prompt_text,
+                gcg_suffix=gcg_suffix,
+                label=label,
+                sample_idx=sample_idx,
+                logger=logger,
+                log=True,
+            )
+        finally:
+            if removers:
+                self._remove_defense_hooks(removers)
+
+    def _install_defense_hooks(self, prompt_content: str, attack_suffix: str) -> list:
+        removers = []
+        for d in self.defenses:
+            if d.requires_inference_context():
+                d.set_inference_context(
+                    self.tokenizer, prompt_content, attack_suffix
+                )
+            if d.requires_model_hooks():
+                removers.extend(d.install_model_hooks(self.model))
+        return removers
+
+    @staticmethod
+    def _remove_defense_hooks(removers: list) -> None:
+        for remove in removers:
+            remove()
+
+    def _generate_with_defense_hooks(
+        self,
+        messages: list,
+        prompt_content: str,
+        attack_suffix: str,
+    ) -> str:
+        removers = self._install_defense_hooks(prompt_content, attack_suffix)
+        try:
+            return self._generate(messages)
+        finally:
+            self._remove_defense_hooks(removers)
 
     def run(self):
         config = self.config
@@ -73,7 +140,7 @@ class GradingDefensePipeline:
             defense_runtime = {
                 "sharpen_clean": True,
                 "sharpen_attacked": True,
-                "attn_implementation": "eager" if has_attention_sharpening(config) else "default",
+                "attn_implementation": "eager" if needs_eager_attention(config) else "default",
             }
         log_extra = {"defense_runtime": defense_runtime} if defense_runtime else None
         run_metadata = build_run_metadata(config, extra=log_extra)
@@ -124,11 +191,16 @@ class GradingDefensePipeline:
 
                     # ── Step 1: 原始推理 ──
                     messages = [{"role": "user", "content": prompt}]
-                    if config.debug:
-                        from utils.attention_utils import analyze_prompt_attention
-                        s = analyze_prompt_attention(self.model, self.tokenizer, prompt, label="[CLEAN]")
+                    attn_meta = {}
+                    if self._should_log_attention():
+                        s = self._analyze_attention(
+                            prompt, "[CLEAN]", logger,
+                            sample_idx=data_idx,
+                        )
                         if s is not None:
                             clean_attn_summaries.append(s)
+                            from utils.attention_utils import attention_summary_to_dict
+                            attn_meta["clean"] = attention_summary_to_dict(s)
                     original_resp = self._generate(messages)
 
                     # ── Step 2: 攻击推理 ──
@@ -175,16 +247,18 @@ class GradingDefensePipeline:
                         else:
                             attacked_messages[0]["content"] = prompt + attack_suffix
 
-                    if config.debug:
-                        from utils.attention_utils import analyze_prompt_attention
-                        s = analyze_prompt_attention(
-                            self.model, self.tokenizer,
+                    if self._should_log_attention():
+                        s = self._analyze_attention(
                             attacked_messages[0]["content"],
+                            "[ATTACKED]",
+                            logger,
                             gcg_suffix=attack_suffix,
-                            label="[ATTACKED]"
+                            sample_idx=data_idx,
                         )
                         if s is not None:
                             attacked_attn_summaries.append(s)
+                            from utils.attention_utils import attention_summary_to_dict
+                            attn_meta["attacked"] = attention_summary_to_dict(s)
                     attacked_resp = self._generate(attacked_messages)
 
                     # ── Step 3: 防御推理 ──
@@ -193,65 +267,154 @@ class GradingDefensePipeline:
                     rejected = False
 
                     if self.defenses:
-                        hook_removers = []
-                        for d in self.defenses:
-                            if d.requires_model_hooks():
-                                hook_removers.extend(d.install_model_hooks(self.model))
-
                         try:
-                            try:
-                                # 对有多次推理需求的 defense 做批量扰动+投票
-                                if self.multi_gen_defenses:
-                                    defended_original_resp = self._generate_with_voting(
-                                        [{"role": "user", "content": prompt}]
+                            if self.multi_gen_defenses:
+                                if self.context_aware_defenses:
+                                    defended_original_resp = self._generate_with_defense_hooks(
+                                        [{"role": "user", "content": prompt}],
+                                        prompt,
+                                        "",
                                     )
-                                    defended_attacked_resp = self._generate_with_voting(
-                                        attacked_messages
+                                    defended_attacked_resp = self._generate_with_defense_hooks(
+                                        attacked_messages,
+                                        attacked_messages[0]["content"],
+                                        attack_suffix,
                                     )
                                 else:
-                                    # pre_process 单次
-                                    defended_prompt = prompt
-                                    for d in self.defenses:
-                                        defended_prompt = d.pre_process(defended_prompt)
-
-                                    defended_original_resp = self._generate(
-                                        [{"role": "user", "content": defended_prompt}]
+                                    hook_removers = self._install_defense_hooks(
+                                        prompt, attack_suffix
                                     )
-                                    # 将 attack_suffix 用与 Step 2 同样的规则插入 defended_prompt
-                                    if config.attack_method.lower() == "gcg":
-                                        defended_insert_pos = defended_prompt.rfind(end_tag)
-                                        if defended_insert_pos != -1:
-                                            defended_attacked_content = (
-                                                defended_prompt[:defended_insert_pos]
-                                                + attack_suffix + end_tag
-                                            )
-                                        else:
-                                            defended_attacked_content = defended_prompt + attack_suffix
-                                    elif config.attack_method.lower() == "roleplay":
-                                        defended_insert_pos = defended_prompt.rfind(end_tag)
-                                        if defended_insert_pos != -1:
-                                            defended_attacked_content = (
-                                                defended_prompt[:defended_insert_pos]
-                                                + attack_suffix + end_tag
-                                            )
-                                        else:
-                                            defended_attacked_content = defended_prompt + attack_suffix
+                                else:
+                                    try:
+                                        defended_original_resp = self._generate_with_voting(
+                                            [{"role": "user", "content": prompt}]
+                                        )
+                                        defended_attacked_resp = self._generate_with_voting(
+                                            attacked_messages
+                                        )
+                                    finally:
+                                        self._remove_defense_hooks(hook_removers)
+                                for d in self.defenses:
+                                    defended_original_resp = d.post_process(
+                                        defended_original_resp or ""
+                                    )
+                                    defended_attacked_resp = d.post_process(
+                                        defended_attacked_resp or ""
+                                    )
+                            else:
+                                defended_prompt = prompt
+                                for d in self.defenses:
+                                    defended_prompt = d.pre_process(defended_prompt)
+
+                                if config.attack_method.lower() == "gcg":
+                                    defended_insert_pos = defended_prompt.rfind(end_tag)
+                                    if defended_insert_pos != -1:
+                                        defended_attacked_content = (
+                                            defended_prompt[:defended_insert_pos]
+                                            + attack_suffix + end_tag
+                                        )
                                     else:
                                         defended_attacked_content = defended_prompt + attack_suffix
-                                    defended_attacked_resp = self._generate(
-                                        [{"role": "user", "content": defended_attacked_content}]
+                                elif config.attack_method.lower() == "roleplay":
+                                    end_tag_rp = "</student_answer>"
+                                    rp_insert = defended_prompt.rfind(end_tag_rp)
+                                    if rp_insert != -1:
+                                        defended_attacked_content = (
+                                            defended_prompt[:rp_insert]
+                                            + attack_suffix + end_tag_rp
+                                        )
+                                    else:
+                                        defended_attacked_content = defended_prompt + attack_suffix
+                                else:
+                                    defended_attacked_content = defended_prompt + attack_suffix
+
+                                if self.context_aware_defenses:
+                                    defended_original_resp = self._generate_with_defense_hooks(
+                                        [{"role": "user", "content": defended_prompt}],
+                                        defended_prompt,
+                                        "",
+                                    )
+                                    defended_attacked_resp = self._generate_with_defense_hooks(
+                                        [{"role": "user", "content": defended_attacked_content}],
+                                        defended_attacked_content,
+                                        attack_suffix,
+                                    )
+                                else:
+                                    hook_removers = self._install_defense_hooks(
+                                        defended_prompt, attack_suffix
+                                    )
+                                    try:
+                                        defended_original_resp = self._generate(
+                                            [{"role": "user", "content": defended_prompt}]
+                                        )
+                                        defended_attacked_resp = self._generate(
+                                            [{"role": "user", "content": defended_attacked_content}]
+                                        )
+                                    finally:
+                                        self._remove_defense_hooks(hook_removers)
+
+                                for d in self.defenses:
+                                    defended_original_resp = d.post_process(
+                                        defended_original_resp or ""
+                                    )
+                                    defended_attacked_resp = d.post_process(
+                                        defended_attacked_resp or ""
                                     )
 
-                                # post_process
-                                for d in self.defenses:
-                                    defended_original_resp = d.post_process(defended_original_resp or "")
-                                    defended_attacked_resp = d.post_process(defended_attacked_resp or "")
+                        except DefenseRejectException:
+                            rejected = True
 
-                            except DefenseRejectException:
-                                rejected = True
-                        finally:
-                            for remove in hook_removers:
-                                remove()
+                    if self._should_log_attention() and self.defenses and not rejected:
+                        defended_prompt_for_attn = prompt
+                        for d in self.defenses:
+                            defended_prompt_for_attn = d.pre_process(defended_prompt_for_attn)
+                        if config.attack_method.lower() == "gcg":
+                            end_tag_rp = "</student_answer>"
+                            defended_insert_pos = defended_prompt_for_attn.rfind(end_tag_rp)
+                            if defended_insert_pos != -1:
+                                defended_attacked_for_attn = (
+                                    defended_prompt_for_attn[:defended_insert_pos]
+                                    + attack_suffix + end_tag_rp
+                                )
+                            else:
+                                defended_attacked_for_attn = defended_prompt_for_attn + attack_suffix
+                        elif config.attack_method.lower() == "roleplay":
+                            end_tag_rp = "</student_answer>"
+                            rp_insert = defended_prompt_for_attn.rfind(end_tag_rp)
+                            if rp_insert != -1:
+                                defended_attacked_for_attn = (
+                                    defended_prompt_for_attn[:rp_insert]
+                                    + attack_suffix + end_tag_rp
+                                )
+                            else:
+                                defended_attacked_for_attn = defended_prompt_for_attn + attack_suffix
+                        else:
+                            defended_attacked_for_attn = defended_prompt_for_attn + attack_suffix
+
+                        from utils.attention_utils import attention_summary_to_dict
+                        s = self._analyze_attention(
+                            defended_prompt_for_attn,
+                            "[DEFENSE-CLEAN]",
+                            logger,
+                            sample_idx=data_idx,
+                            with_defense_hooks=True,
+                            hook_prompt_content=prompt,
+                            hook_attack_suffix="",
+                        )
+                        if s is not None:
+                            attn_meta["defense_clean"] = attention_summary_to_dict(s)
+                        s = self._analyze_attention(
+                            defended_attacked_for_attn,
+                            "[DEFENSE-ATTACKED]",
+                            logger,
+                            gcg_suffix=attack_suffix,
+                            sample_idx=data_idx,
+                            with_defense_hooks=True,
+                            hook_prompt_content=prompt,
+                            hook_attack_suffix=attack_suffix,
+                        )
+                        if s is not None:
+                            attn_meta["defense_attacked"] = attention_summary_to_dict(s)
 
                     # ── Step 4: 记录结果 ──
                     result = AttackResult(
@@ -262,6 +425,7 @@ class GradingDefensePipeline:
                             "defended_original_response": defended_original_resp,
                             "defended_attacked_response": defended_attacked_resp,
                             "rejected": rejected,
+                            "attention": attn_meta or None,
                         }
                     )
                     logger.result(result.as_dict())
@@ -273,11 +437,12 @@ class GradingDefensePipeline:
                     traceback.print_exc()
 
             # ── 打印 attention 平均统计 ──
-            if config.debug and (clean_attn_summaries or attacked_attn_summaries):
+            if self._should_log_attention() and (clean_attn_summaries or attacked_attn_summaries):
                 from utils.attention_utils import (
                     print_clean_attention_stats,
                     print_attacked_attention_stats,
                     build_attention_dataframe,
+                    format_attention_aggregate_lines,
                 )
                 ds_label = f"[CLEAN AVERAGE {data_config.name}]"
                 if clean_attn_summaries:
@@ -285,12 +450,20 @@ class GradingDefensePipeline:
                         (s, data_config.name) for s in clean_attn_summaries
                     )
                     print_clean_attention_stats(clean_attn_summaries, label=ds_label)
+                    for line in format_attention_aggregate_lines(
+                        clean_attn_summaries, ds_label
+                    ):
+                        logger.info(line)
                 if attacked_attn_summaries:
                     all_attacked_attn_summaries.extend(
                         (s, data_config.name) for s in attacked_attn_summaries
                     )
                     atk_label = f"[ATTACKED AVERAGE {data_config.name}]"
                     print_attacked_attention_stats(attacked_attn_summaries, label=atk_label)
+                    for line in format_attention_aggregate_lines(
+                        attacked_attn_summaries, atk_label
+                    ):
+                        logger.info(line)
                 df = build_attention_dataframe(clean_attn_summaries,
                                                attacked_attn_summaries,
                                                data_config.name,
@@ -372,20 +545,29 @@ class GradingDefensePipeline:
             )
 
         # ── 跨数据集总体 attention 统计 ──
-        if config.debug and (all_clean_attn_summaries or all_attacked_attn_summaries):
+        if self._should_log_attention() and (all_clean_attn_summaries or all_attacked_attn_summaries):
             from utils.attention_utils import (
                 print_clean_attention_stats,
                 print_attacked_attention_stats,
+                format_attention_aggregate_lines,
             )
             if all_clean_attn_summaries:
                 clean_only = [s for s, _ in all_clean_attn_summaries]
                 print_clean_attention_stats(clean_only, label="[CLEAN AVERAGE OVERALL]")
+                for line in format_attention_aggregate_lines(
+                    clean_only, "[CLEAN AVERAGE OVERALL]"
+                ):
+                    logger.info(line)
             if all_attacked_attn_summaries:
                 atk_only = [s for s, _ in all_attacked_attn_summaries]
                 print_attacked_attention_stats(atk_only, label="[ATTACKED AVERAGE OVERALL]")
+                for line in format_attention_aggregate_lines(
+                    atk_only, "[ATTACKED AVERAGE OVERALL]"
+                ):
+                    logger.info(line)
 
         # ── CSV 导出 ──
-        if config.debug and all_attn_dfs:
+        if self._should_log_attention() and all_attn_dfs:
             import pandas as pd
             combined_df = pd.concat(all_attn_dfs, ignore_index=True)
             csv_path = os.path.splitext(logger.result_path)[0] + "_attention.csv"

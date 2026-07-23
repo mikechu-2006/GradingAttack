@@ -1,9 +1,10 @@
-name: RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-smoke
+name: RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-smoke-2c
 
 method: RolePlay
 pipeline_mode: true
+log_attention: true
 debug: true
-nclass: 3
+nclass: 2
 template: ci
 
 params:

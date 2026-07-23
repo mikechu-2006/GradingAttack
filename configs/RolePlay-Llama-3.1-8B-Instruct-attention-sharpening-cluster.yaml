@@ -1,9 +1,10 @@
-name: RolePlay-Llama-3.1-8B-Instruct-attention-sharpening
+name: RolePlay-Llama-3.1-8B-Instruct-attention-sharpening-2c
 
 method: RolePlay
 pipeline_mode: true
 debug: false
-nclass: 3
+log_attention: true
+nclass: 2
 template: ci
 
 params:
@@ -16,7 +17,7 @@ model:
 data:
   - name: scientsbank
     path: ./dataset/scientsbank.jsonl
-    max_samples: 300
+    max_samples: 100
     random_seed: 42
 
 generation:

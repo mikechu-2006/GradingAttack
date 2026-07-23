@@ -37,6 +37,18 @@ class BaseDefense(ABC):
         """是否需要在推理前安装模型级 hook（如 Attention Sharpening）。"""
         return False
 
+    def requires_inference_context(self) -> bool:
+        """是否需要在每次推理前设置 prompt/suffix 上下文（如 Hijacking Suppression）。"""
+        return False
+
+    def set_inference_context(
+        self,
+        tokenizer,
+        prompt_content: str,
+        attack_suffix: str = "",
+    ) -> None:
+        """在安装 hook 前注入当前样本的 prompt / suffix 信息。"""
+
     def install_model_hooks(self, model) -> list:
         """安装模型 hook，返回 uninstall 回调列表。"""
         return []
