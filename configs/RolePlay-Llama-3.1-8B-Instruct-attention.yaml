@@ -1,3 +1,4 @@
+# DEPRECATED: use configs/roleplay/attention_logging/debug.yaml
 name: RolePlay-Llama-3.1-8B-Instruct-attention
 
 method: RolePlay

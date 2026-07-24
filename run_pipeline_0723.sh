@@ -7,4 +7,4 @@
 #SBATCH -t 7-00:00:00
 
 
-python main.py --pipeline configs/RolePlay-Llama-3.1-8B-Instruct-attention.yaml
+python main.py --pipeline configs/roleplay/attention_logging/debug.yaml

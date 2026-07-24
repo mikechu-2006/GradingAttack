@@ -1,3 +1,2 @@
 #!/bin/bash
-# 兼容入口 → scripts/run_hijacking_suppression_pipeline.sh
-exec bash scripts/run_hijacking_suppression_pipeline.sh
+exec bash scripts/roleplay_defenses/hijacking_suppression/run_pipeline.sh

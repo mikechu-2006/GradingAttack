@@ -5,21 +5,20 @@ from typing import Dict
 from datetime import datetime
 
 from utils.config_utils import AttackConfig
+from utils.experiment_paths import experiment_log_dir, experiment_result_dir
 
 
 class GradingAttackLogger:
     def __init__(self, config: AttackConfig):
         time_string = datetime.now().strftime("%Y%m%d%H%M")
+        log_root = experiment_log_dir(config)
+        result_root = experiment_result_dir(config)
         self.log_path = os.path.join(
-            config.log_config.log_dir,
-            config.attack_method,
-            config.model_config.name,
+            log_root,
             f"{config.name}_{time_string}.log",
         )
         self.result_path = os.path.join(
-            config.log_config.result_dir,
-            config.attack_method,
-            config.model_config.name,
+            result_root,
             f"{config.name}_{time_string}.jsonl",
         )
 

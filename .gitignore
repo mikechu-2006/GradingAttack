@@ -1,8 +1,12 @@
 logs/
 logs_defense/
+logs/slurm/
+logs/roleplay/
 result/
 result_defense/
+result/roleplay/
 configs/generated/
+configs/roleplay/*/generated/
 output_*.txt
 err_*.txt
 output_grid_*.txt
