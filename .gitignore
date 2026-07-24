@@ -1,6 +1,6 @@
 logs/
 logs_defense/
-result/
+
 result_defense/
 configs/generated/
 output_*.txt

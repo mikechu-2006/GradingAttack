@@ -211,6 +211,23 @@ class GradingDefensePipeline:
                         import nanogcg
                         target = config.params["target"]
                         gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
+
+                        # 过滤 Llama reserved_special_token（默认过滤不覆盖这类 token）
+                        import nanogcg.utils as _ncg_utils
+                        _orig_get_nonascii_toks = _ncg_utils.get_nonascii_toks
+                        def _patched_get_nonascii_toks(tokenizer, device="cpu"):
+                            not_allowed = _orig_get_nonascii_toks(tokenizer, device)
+                            reserved_ids = [
+                                tid for tok, tid in tokenizer.get_vocab().items()
+                                if tok.startswith("<|reserved_special_token_")
+                            ]
+                            if reserved_ids:
+                                not_allowed = torch.cat([
+                                    not_allowed,
+                                    torch.tensor(reserved_ids, device=device),
+                                ])
+                            return not_allowed
+                        _ncg_utils.get_nonascii_toks = _patched_get_nonascii_toks
                         # Blind prompt for GCG optimization (no solution)
                         blind_prompt = config.grading_template.format(
                             question=data.question,
