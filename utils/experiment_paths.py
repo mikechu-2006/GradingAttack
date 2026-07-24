@@ -45,7 +45,28 @@ def roleplay_defense_dir(config: AttackConfig) -> Optional[str]:
     return primary_defense_type(config)
 
 
+def scientsbank_2c_pipeline_id(config: AttackConfig) -> Optional[str]:
+    """从 run name 解析 pipeline id，如 scientsbank-2c-gcg-hs-full → gcg_hs。"""
+    name = config.name or ""
+    if not name.startswith("scientsbank-2c-"):
+        return None
+    rest = name[len("scientsbank-2c-"):]
+    parts = rest.split("-")
+    if len(parts) >= 2:
+        return f"{parts[0]}_{parts[1]}"
+    return None
+
+
+def is_scientsbank_2c_experiment(config: AttackConfig) -> bool:
+    return scientsbank_2c_pipeline_id(config) is not None
+
+
 def experiment_log_dir(config: AttackConfig) -> str:
+    sb_id = scientsbank_2c_pipeline_id(config)
+    if sb_id:
+        return os.path.join(
+            config.log_config.log_dir, "experiments", "scientsbank_2c", sb_id
+        )
     defense = roleplay_defense_dir(config)
     if defense:
         return os.path.join(config.log_config.log_dir, "roleplay", defense)
@@ -57,6 +78,11 @@ def experiment_log_dir(config: AttackConfig) -> str:
 
 
 def experiment_result_dir(config: AttackConfig) -> str:
+    sb_id = scientsbank_2c_pipeline_id(config)
+    if sb_id:
+        return os.path.join(
+            config.log_config.result_dir, "experiments", "scientsbank_2c", sb_id
+        )
     defense = roleplay_defense_dir(config)
     if defense:
         return os.path.join(config.log_config.result_dir, "roleplay", defense)

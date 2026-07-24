@@ -11,6 +11,9 @@ result_defense/
 result/roleplay/
 configs/generated/
 configs/roleplay/*/generated/
+configs/experiments/scientsbank_2c/*/generated/
+result/experiments/
+logs/experiments/
 output_*.txt
 err_*.txt
 output_grid_*.txt

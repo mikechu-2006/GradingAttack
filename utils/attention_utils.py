@@ -233,10 +233,37 @@ def _agg_last_token(attn: torch.Tensor,
         seg_sums[seg] += last_row[idx].item()
 
     total = sum(seg_sums.values()) or 1.0
-    return {seg: seg_sums.get(seg, 0.0) / total for seg in ordered_segments}
+    weights = {seg: seg_sums.get(seg, 0.0) / total for seg in ordered_segments}
+    weights["student_suffix"] = weights.get("student", 0.0) + weights.get("suffix", 0.0)
+    return weights
 
 
-# ── 格式化输出 ───────────────────────────────────────────
+def _display_segments(ordered_segments: List[str]) -> List[str]:
+    """日志输出用的 segment 列（含 student_suffix）。"""
+    segs = list(ordered_segments)
+    if "student_suffix" not in segs:
+        segs.append("student_suffix")
+    return segs
+
+
+def _top_k_token_lines(
+    positions: List[Dict[str, object]],
+    *,
+    prefix: str,
+    label: str,
+    layer_label: str,
+    k: int = 5,
+) -> List[str]:
+    if not positions:
+        return []
+    ranked = sorted(positions, key=lambda e: e["weight"], reverse=True)[:k]
+    lines = [f"[ATTENTION_TOP5] {prefix}{label} {layer_label} (global top-{k} tokens)"]
+    for i, entry in enumerate(ranked, start=1):
+        lines.append(
+            f"  {i}. w={entry['weight']:.6f}  seg={entry['segment']:<12s}  "
+            f"pos={entry['pos']}  tok={entry['token']!r}"
+        )
+    return lines
 
 def _format_position_value_lines(
     positions: List[Dict[str, object]],
@@ -283,6 +310,7 @@ def format_attention_log_lines(summary: dict, bar_len: int = 40) -> List[str]:
     sample_idx = summary.get("_sample_idx")
     prefix = f"sample={sample_idx} " if sample_idx is not None else ""
     lines: List[str] = []
+    display_segs = _display_segments(ordered_segments)
 
     for layer_name in ["last_layer", "last_3_avg"]:
         seg_weights = summary.get(layer_name)
@@ -291,20 +319,23 @@ def format_attention_log_lines(summary: dict, bar_len: int = 40) -> List[str]:
         layer_label = "last_layer" if layer_name == "last_layer" else "last_3_layers_avg"
         lines.append("=" * 70)
         lines.append(f"[ATTENTION] {prefix}{label} — {layer_label} (prediction → segment weights)")
-        for seg_name in ordered_segments:
+        for seg_name in display_segs:
             w = seg_weights.get(seg_name, 0.0)
             n_bar = int(w * bar_len)
             bar = _safe_bar(n_bar, bar_len)
             lines.append(f"  {seg_name:>14s}  |{bar}| {w:.6f}")
-        # 紧凑数值行，便于 grep / 解析
         numeric = "  ".join(
-            f"{seg}={seg_weights.get(seg, 0.0):.6f}" for seg in ordered_segments
+            f"{seg}={seg_weights.get(seg, 0.0):.6f}" for seg in display_segs
         )
         lines.append(f"[ATTENTION_VALUES] {prefix}{label} {layer_label}: {numeric}")
 
         pos_key = "last_layer_positions" if layer_name == "last_layer" else "last_3_avg_positions"
+        positions = summary.get(pos_key) or []
+        lines.extend(_top_k_token_lines(
+            positions, prefix=prefix, label=label, layer_label=layer_label, k=5
+        ))
         position_lines = _format_position_value_lines(
-            summary.get(pos_key) or [],
+            positions,
             prefix=prefix,
             label=label,
             layer_label=layer_label,
@@ -329,11 +360,16 @@ def attention_summary_to_dict(summary: dict) -> dict:
     return {
         "label": summary.get("_label"),
         "sample_idx": summary.get("_sample_idx"),
-        "segments": summary.get("_segments", []),
+        "segments": _display_segments(summary.get("_segments", [])),
         "last_layer": dict(summary.get("last_layer") or {}),
         "last_3_avg": dict(summary.get("last_3_avg") or {}),
         "last_layer_positions": list(summary.get("last_layer_positions") or []),
         "last_3_avg_positions": list(summary.get("last_3_avg_positions") or []),
+        "top5_last_layer": sorted(
+            summary.get("last_layer_positions") or [],
+            key=lambda e: e["weight"],
+            reverse=True,
+        )[:5],
     }
 
 

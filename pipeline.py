@@ -103,6 +103,36 @@ class GradingDefensePipeline:
             if removers:
                 self._remove_defense_hooks(removers)
 
+    def _verdict_label(self, response: str) -> str:
+        from eval.metrics import _parse_grade
+        grade = _parse_grade(response or "", self.config.nclass)
+        if grade is None:
+            return "unknown"
+        return "correct" if grade == 0 else "incorrect"
+
+    def _log_sample_verdict(
+        self,
+        logger: GradingAttackLogger,
+        data_idx: int,
+        data,
+        original_resp: str,
+        attacked_resp: str,
+        defended_original_resp: Optional[str],
+        defended_attacked_resp: Optional[str],
+    ) -> None:
+        lines = [
+            f"[SAMPLE] idx={data_idx} qid={data.question_id} gt={data.verification}",
+            f"  original={self._verdict_label(original_resp)}",
+            f"  attacked={self._verdict_label(attacked_resp)}",
+        ]
+        if defended_original_resp is not None:
+            lines.append(f"  defense_clean={self._verdict_label(defended_original_resp)}")
+        if defended_attacked_resp is not None:
+            lines.append(f"  defense_attacked={self._verdict_label(defended_attacked_resp)}")
+        for line in lines:
+            print(line, flush=True)
+            logger.info(line)
+
     def _install_defense_hooks(self, prompt_content: str, attack_suffix: str) -> list:
         removers = []
         for d in self.defenses:
@@ -431,6 +461,17 @@ class GradingDefensePipeline:
                         )
                         if s is not None:
                             attn_meta["defense_attacked"] = attention_summary_to_dict(s)
+
+                    if self._should_log_attention():
+                        self._log_sample_verdict(
+                            logger,
+                            data_idx,
+                            data,
+                            original_resp,
+                            attacked_resp,
+                            defended_original_resp,
+                            defended_attacked_resp,
+                        )
 
                     # ── Step 4: 记录结果 ──
                     result = AttackResult(
