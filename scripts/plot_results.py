@@ -1,4 +1,4 @@
-﻿"""Generate a compact ASR/QWK comparison figure for the current experiments.
+"""Generate a compact ASR/QWK comparison figure for the current experiments.
 
 The script intentionally uses only the Python standard library so it can run in
 the HPC environment without extra plotting dependencies.
@@ -53,6 +53,14 @@ RESULTS = [
         "asr": 0.1667,
         "defended_asr": 0.1667,
         "note": "Smoke test only; no ASR improvement",
+    },    {
+        "setting": "HijackingSuppression",
+        "samples": 300,
+        "clean_qwk": 0.3136,
+        "defended_clean_qwk": 0.2753,
+        "asr": 0.0055,
+        "defended_asr": 0.0166,
+        "note": "Attention-based exploratory run; no ASR improvement",
     },
 ]
 
