@@ -40,6 +40,12 @@
 <text x="746.0" y="270.3" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#172026">0.167</text>
 <text x="800.0" y="199.6" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#172026">0.303</text>
 <text x="773.0" y="418" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#6b7780">n=50</text>
+<rect x="925.0" y="356.4" width="42.0" height="8.6" fill="#d95f59" rx="3" />
+<rect x="979.0" y="221.8" width="42.0" height="143.2" fill="#3576b8" rx="3" />
+<text x="973.0" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#172026">HijackingSuppression</text>
+<text x="946.0" y="348.4" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#172026">0.017</text>
+<text x="1000.0" y="213.8" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#172026">0.275</text>
+<text x="973.0" y="418" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#6b7780">n=300</text>
 <rect x="80" y="462" width="16" height="16" fill="#d95f59" rx="3" />
 <text x="104" y="475" font-family="Arial, sans-serif" font-size="13" fill="#172026">Defended ASR</text>
 <rect x="220" y="462" width="16" height="16" fill="#3576b8" rx="3" />

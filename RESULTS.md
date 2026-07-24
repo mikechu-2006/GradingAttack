@@ -45,6 +45,15 @@ The no-defense run establishes the baseline vulnerability: RolePlay reaches **16
 
 **AttentionSharpening** in the current 2-class setup does not appear effective against RolePlay. Its defended ASR is higher than the attack ASR, so it should not be presented as a successful defense in its current form.
 
+## HijackingSuppression Exploratory Run
+
+A 300-sample HijackingSuppression run was completed on HPC job `10050323`.
+
+| Setting | Defense | Samples | Clean QWK | Attack QWK | Defended Clean QWK | Defended Attack QWK | ASR | Defended ASR | CAS | Defended CAS |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RolePlay | HijackingSuppression | 300 | 0.3136 | 0.0440 | 0.2753 | 0.0891 | 0.0055 | 0.0166 | 0.0681 | 0.0876 |
+
+This run is best treated as an exploratory negative result. HijackingSuppression slightly improves attacked QWK from **0.0440** to **0.0891**, but it does not reduce ASR; defended ASR increases from **0.0055** to **0.0166**, and clean QWK drops from **0.3136** to **0.2753**. In the current configuration, it is not better than SelfReminder.
 ## Current Takeaway
 
 The current experiments support this conclusion:

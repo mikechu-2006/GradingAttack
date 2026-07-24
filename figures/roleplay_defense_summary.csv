@@ -3,3 +3,4 @@ No defense,300,0.3226863445042357,0.3226863445042357,0.16574585635359115,0.16574
 SelfReminder,300,0.3226863445042357,0.3318660587957869,0.16574585635359115,0.049723756906077346,Best robustness-utility tradeoff
 ParaphraseDefense,300,0.3227,0.1837,0.1657,0.0221,"Strongest ASR reduction, large QWK drop"
 SmoothLLM,50,0.4444,0.3026,0.1667,0.1667,Smoke test only; no ASR improvement
+HijackingSuppression,300,0.3136,0.2753,0.0055,0.0166,Attention-based exploratory run; no ASR improvement
