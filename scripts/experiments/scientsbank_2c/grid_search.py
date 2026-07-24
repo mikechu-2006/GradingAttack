@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 TUNE_SAMPLES_GCG = 20
 TUNE_SAMPLES_ROLEPLAY = 50

@@ -53,7 +53,10 @@ def scientsbank_2c_pipeline_id(config: AttackConfig) -> Optional[str]:
     rest = name[len("scientsbank-2c-"):]
     parts = rest.split("-")
     if len(parts) >= 2:
-        return f"{parts[0]}_{parts[1]}"
+        attack = parts[0]
+        if attack == "rp":
+            attack = "roleplay"
+        return f"{attack}_{parts[1]}"
     return None
 
 
