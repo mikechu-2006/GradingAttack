@@ -15,6 +15,7 @@ The current experiments focus on:
 - **Main defenses:** SelfReminder, ParaphraseDefense, SmoothLLM, AttentionSharpening, HijackingSuppression
 
 See [RESULTS.md](RESULTS.md) for the current experiment summary.
+See [GCG_README.md](GCG_README.md) for the GCG suffix-bank attack workflow and HPC usage.
 
 ## Project Structure
 

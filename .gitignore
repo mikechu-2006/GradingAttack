@@ -1,12 +1,8 @@
 logs/
 logs_defense/
-<<<<<<< HEAD
 logs/slurm/
 logs/roleplay/
 result/
-=======
-
->>>>>>> 443c0d24a363b564bbe380cfa79083951bdbad10
 result_defense/
 result/roleplay/
 configs/generated/
