@@ -327,6 +327,13 @@ class GradingDefensePipeline:
                             attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
                         else:
                             attacked_messages[0]["content"] = prompt + attack_suffix
+                    elif config.attack_method.lower() == "injection":
+                        attack_suffix = config.params["injection_prompt"]
+                        insert_pos = prompt.rfind(end_tag)
+                        if insert_pos != -1:
+                            attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
+                        else:
+                            attacked_messages[0]["content"] = prompt + attack_suffix
                     elif config.attack_method.lower() == "gcg_suffix_bank":
                         import time as _sbtime
                         from eval.metrics import _parse_grade
@@ -469,6 +476,15 @@ class GradingDefensePipeline:
                                         )
                                     else:
                                         defended_attacked_content = defended_prompt + attack_suffix
+                                elif config.attack_method.lower() == "injection":
+                                    rp_insert = defended_prompt.rfind(end_tag)
+                                    if rp_insert != -1:
+                                        defended_attacked_content = (
+                                            defended_prompt[:rp_insert]
+                                            + attack_suffix + end_tag
+                                        )
+                                    else:
+                                        defended_attacked_content = defended_prompt + attack_suffix
                                 else:
                                     defended_attacked_content = defended_prompt + attack_suffix
 
@@ -522,6 +538,15 @@ class GradingDefensePipeline:
                             else:
                                 defended_attacked_for_attn = defended_prompt_for_attn + attack_suffix
                         elif config.attack_method.lower() == "roleplay":
+                            rp_insert = defended_prompt_for_attn.rfind(end_tag)
+                            if rp_insert != -1:
+                                defended_attacked_for_attn = (
+                                    defended_prompt_for_attn[:rp_insert]
+                                    + attack_suffix + end_tag
+                                )
+                            else:
+                                defended_attacked_for_attn = defended_prompt_for_attn + attack_suffix
+                        elif config.attack_method.lower() == "injection":
                             rp_insert = defended_prompt_for_attn.rfind(end_tag)
                             if rp_insert != -1:
                                 defended_attacked_for_attn = (
