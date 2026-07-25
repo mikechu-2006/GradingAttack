@@ -1,0 +1,25 @@
+============================================================
+[RUN_CONFIG] Experiment metadata
+============================================================
+  name:          GCG-SuffixBank-Llama-3.1-8B-Instruct-3c
+  attack_method: gcg_suffix_bank
+  model:         Llama-3.1-8B-Instruct
+  model_path:    (auto-download)
+  model_id:      LLM-Research/Meta-Llama-3.1-8B-Instruct
+  template:      ci
+  nclass:        2
+  log_attention: False
+
+  [generation]
+    temperature:   0.01
+    max_tokens:    1024
+
+  [data #1]
+    name:          scientsbank
+    path:          ./dataset/scientsbank.jsonl
+    max_samples:   100
+    random_seed:   42
+
+  [defenses] (none)
+
+============================================================
