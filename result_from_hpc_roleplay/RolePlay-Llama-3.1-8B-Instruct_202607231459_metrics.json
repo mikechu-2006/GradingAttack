@@ -72,13 +72,15 @@
       25
     ]
   ],
-  "asr": 0.16574585635359115,
-  "asr_defended": 0.049723756906077346,
-  "cas": 0.46817958285764855,
-  "cas_defended": 0.1990385572210874,
+  "asr": 0.17751479289940827,
+  "asr_defended": 0.05454545454545454,
+  "cas": 0.48451631494481534,
+  "cas_defended": 0.20846566251918755,
   "total": 300,
   "total_correct": 119,
   "total_incorrect": 181,
+  "total_attack_eligible": 169,
+  "total_defense_eligible": 165,
   "config": {
     "name": "RolePlay-Llama-3.1-8B-Instruct",
     "attack_method": "RolePlay",

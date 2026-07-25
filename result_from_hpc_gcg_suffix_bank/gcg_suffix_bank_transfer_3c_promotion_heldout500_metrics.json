@@ -1,0 +1,33 @@
+{
+  "total_samples": 500,
+  "bank_size": 5,
+  "total_correct": 208,
+  "total_non_correct": 292,
+  "eligible_non_correct": 269,
+  "transfer_success_any_original": 291,
+  "project_asr_success": 268,
+  "promotion_success": 269,
+  "transfer_rate_any_original": 0.9965753424657534,
+  "project_asr": 0.9962825278810409,
+  "promotion_asr": 1.0,
+  "by_label": {
+    "incorrect": {
+      "total": 292,
+      "eligible_total": 269,
+      "transfer_success_any_original": 291,
+      "project_asr_success": 268,
+      "promotion_success": 269,
+      "transfer_rate_any_original": 0.9965753424657534,
+      "project_asr": 0.9962825278810409,
+      "promotion_asr": 1.0
+    }
+  },
+  "asr_note": "transfer_rate_any_original counts all ground-truth non-correct samples that become correct under any bank suffix. project_asr matches this project's stricter metric: original model prediction must not already be correct, and attack prediction must become correct. promotion_asr counts any grading relaxation, e.g. incorrect -> contradictory/correct in 3-class or incorrect -> correct in 2-class.",
+  "excluded_bank_source_indices": [
+    2980,
+    4531,
+    4654,
+    4856,
+    4888
+  ]
+}

@@ -72,11 +72,13 @@
       0
     ]
   ],
-  "asr": 0.16574585635359115,
-  "asr_defended": 0.16574585635359115,
-  "cas": 0.46817958285764855,
-  "cas_defended": 0.46817958285764855,
+  "asr": 0.17751479289940827,
+  "asr_defended": 0.17751479289940827,
+  "cas": 0.48451631494481534,
+  "cas_defended": 0.48451631494481534,
   "total": 300,
   "total_correct": 119,
-  "total_incorrect": 181
+  "total_incorrect": 181,
+  "total_attack_eligible": 169,
+  "total_defense_eligible": 169
 }
