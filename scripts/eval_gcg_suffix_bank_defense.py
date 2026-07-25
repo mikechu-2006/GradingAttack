@@ -1,5 +1,12 @@
 """Evaluate defenses against a transferable GCG suffix bank.
 
+DEPRECATED: Use pipeline.py with method=gcg_suffix_bank, pipeline_mode=true,
+and a config with defenses configured. See
+configs/GCG-SuffixBank-SelfReminder-Llama-3.1-8B-Instruct-3c.yaml for an example.
+
+This script is kept for backward compatibility and quick ad-hoc evaluation.
+It will be removed in a future release.
+
 This script uses an existing suffix bank and compares no-defense transfer ASR
 with defended transfer ASR on the same sampled examples.
 """
@@ -10,6 +17,7 @@ import argparse
 import json
 import random
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +159,13 @@ def rate(num: int, den: int) -> float:
 
 
 def main() -> None:
+    warnings.warn(
+        "eval_gcg_suffix_bank_defense.py is deprecated. "
+        "Use pipeline.py with method: gcg_suffix_bank, pipeline_mode: true, "
+        "and defenses configured in your config.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 

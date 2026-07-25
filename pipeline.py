@@ -110,6 +110,16 @@ class GradingDefensePipeline:
             return "unknown"
         return "correct" if grade == 0 else "incorrect"
 
+    @staticmethod
+    def _grade_label(grade_int, nclass: int) -> str:
+        """Convert int grade (0/1/2) to human-readable label."""
+        if grade_int is None:
+            return "unknown"
+        labels = ("correct", "incorrect") if nclass == 2 else ("correct", "contradictory", "incorrect")
+        if 0 <= grade_int < len(labels):
+            return labels[grade_int]
+        return "unknown"
+
     def _log_sample_verdict(
         self,
         logger: GradingAttackLogger,
@@ -202,6 +212,19 @@ class GradingDefensePipeline:
         all_attacked_attn_summaries = []
         all_attn_dfs = []
 
+        # ── 后缀银行加载 (gcg_suffix_bank) ──
+        bank = None
+        bank_source_indices: set[int] = set()
+        if config.attack_method.lower() == "gcg_suffix_bank":
+            bank = self._load_suffix_bank()
+            if config.params.get("exclude_bank_source_indices", True):
+                bank_source_indices = self._load_bank_source_indices()
+                print(
+                    f"[pipeline] Excluding {len(bank_source_indices)} bank source indices "
+                    f"from heldout evaluation.",
+                    flush=True,
+                )
+
         for data_config in config.data_config:
             data_list = read_student_qa_data_from_jsonl(data_config.path)
             if data_config.max_samples and data_config.max_samples < len(data_list):
@@ -210,8 +233,19 @@ class GradingDefensePipeline:
             all_results = []
             clean_attn_summaries = []
             attacked_attn_summaries = []
+            total_samples = len(data_list)
+            sample_count = 0  # running counter for non-excluded samples
 
             for data_idx, data in enumerate(data_list):
+                # Skip bank-source samples for fair transfer evaluation
+                if bank_source_indices and data_idx in bank_source_indices:
+                    print(
+                        f"[pipeline] Skipping sample {data_idx}: "
+                        f"found in bank source indices",
+                        flush=True,
+                    )
+                    continue
+
                 try:
                     prompt = config.grading_template.format(
                         question=data.question,
@@ -236,6 +270,8 @@ class GradingDefensePipeline:
                     # ── Step 2: 攻击推理 ──
                     attacked_messages = [{"role": "user", "content": prompt}]
                     attack_suffix = ""
+                    end_tag = "</student_answer>"
+                    bank_meta = None  # populated by gcg_suffix_bank branch
                     if config.attack_method.lower() == "gcg":
                         import time
                         import nanogcg
@@ -264,7 +300,6 @@ class GradingDefensePipeline:
                             solution="",
                             student_answer=data.student_answer,
                         )
-                        end_tag = "</student_answer>"
                         blind_insert_pos = blind_prompt.rfind(end_tag)
                         if blind_insert_pos != -1:
                             blind_gcq_prompt = blind_prompt[:blind_insert_pos]
@@ -287,12 +322,74 @@ class GradingDefensePipeline:
                         print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
                     elif config.attack_method.lower() == "roleplay":
                         attack_suffix = config.params["adv_prompt"]
-                        end_tag = "</student_answer>"
                         insert_pos = prompt.rfind(end_tag)
                         if insert_pos != -1:
                             attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
                         else:
                             attacked_messages[0]["content"] = prompt + attack_suffix
+                    elif config.attack_method.lower() == "gcg_suffix_bank":
+                        import time as _sbtime
+                        from eval.metrics import _parse_grade
+
+                        t_start = _sbtime.perf_counter()
+                        # Defaults: no suffix succeeds
+                        attacked_resp = original_resp
+                        attack_suffix = ""
+                        success_suffix_index = None
+                        success_suffix = None
+                        promotion_suffix_index = None
+                        promotion_suffix = None
+                        suffixes_tried = 0
+                        insert_pos_sb = prompt.rfind(end_tag)
+                        original_grade_for_bank = _parse_grade(original_resp, config.nclass)
+
+                        for suffix_idx, suffix in enumerate(bank):
+                            suffixes_tried += 1
+                            if insert_pos_sb != -1:
+                                test_content = prompt[:insert_pos_sb] + suffix + end_tag
+                            else:
+                                test_content = prompt + suffix
+
+                            test_resp = self._generate(
+                                [{"role": "user", "content": test_content}]
+                            )
+                            test_grade = _parse_grade(test_resp, config.nclass)
+
+                            # Track first promotion (any grade improvement)
+                            if (original_grade_for_bank is not None
+                                    and test_grade is not None
+                                    and test_grade < original_grade_for_bank
+                                    and promotion_suffix_index is None):
+                                promotion_suffix_index = suffix_idx
+                                promotion_suffix = suffix
+
+                            # Early stop on correct flip
+                            if test_grade == 0:  # 0 = correct
+                                attacked_resp = test_resp
+                                attack_suffix = suffix
+                                success_suffix_index = suffix_idx
+                                success_suffix = suffix
+                                attacked_messages[0]["content"] = test_content
+                                break
+
+                        t_end = _sbtime.perf_counter()
+                        print(
+                            f"[SuffixBank] Tried {suffixes_tried}/{len(bank)} suffixes "
+                            f"in {t_end - t_start:.1f}s, "
+                            f"success_idx={success_suffix_index}, "
+                            f"promotion_idx={promotion_suffix_index}",
+                            flush=True,
+                        )
+
+                        bank_meta = {
+                            "success_suffix_index": success_suffix_index,
+                            "success_suffix": success_suffix,
+                            "promotion_suffix_index": promotion_suffix_index,
+                            "promotion_suffix": promotion_suffix,
+                            "suffixes_tried": suffixes_tried,
+                            "bank_path": config.params.get("bank_path"),
+                            "bank_size": len(bank),
+                        }
 
                     if self._should_log_attention():
                         s = self._analyze_attention(
@@ -306,7 +403,9 @@ class GradingDefensePipeline:
                             attacked_attn_summaries.append(s)
                             from utils.attention_utils import attention_summary_to_dict
                             attn_meta["attacked"] = attention_summary_to_dict(s)
-                    attacked_resp = self._generate(attacked_messages)
+                    # gcg_suffix_bank generates inside its branch (multi-suffix iteration)
+                    if config.attack_method.lower() != "gcg_suffix_bank":
+                        attacked_resp = self._generate(attacked_messages)
 
                     # ── Step 3: 防御推理 ──
                     defended_original_resp = None
@@ -352,7 +451,7 @@ class GradingDefensePipeline:
                                 for d in self.defenses:
                                     defended_prompt = d.pre_process(defended_prompt)
 
-                                if config.attack_method.lower() == "gcg":
+                                if config.attack_method.lower() in ("gcg", "gcg_suffix_bank"):
                                     defended_insert_pos = defended_prompt.rfind(end_tag)
                                     if defended_insert_pos != -1:
                                         defended_attacked_content = (
@@ -362,12 +461,11 @@ class GradingDefensePipeline:
                                     else:
                                         defended_attacked_content = defended_prompt + attack_suffix
                                 elif config.attack_method.lower() == "roleplay":
-                                    end_tag_rp = "</student_answer>"
-                                    rp_insert = defended_prompt.rfind(end_tag_rp)
+                                    rp_insert = defended_prompt.rfind(end_tag)
                                     if rp_insert != -1:
                                         defended_attacked_content = (
                                             defended_prompt[:rp_insert]
-                                            + attack_suffix + end_tag_rp
+                                            + attack_suffix + end_tag
                                         )
                                     else:
                                         defended_attacked_content = defended_prompt + attack_suffix
@@ -414,23 +512,21 @@ class GradingDefensePipeline:
                         defended_prompt_for_attn = prompt
                         for d in self.defenses:
                             defended_prompt_for_attn = d.pre_process(defended_prompt_for_attn)
-                        if config.attack_method.lower() == "gcg":
-                            end_tag_rp = "</student_answer>"
-                            defended_insert_pos = defended_prompt_for_attn.rfind(end_tag_rp)
+                        if config.attack_method.lower() in ("gcg", "gcg_suffix_bank"):
+                            defended_insert_pos = defended_prompt_for_attn.rfind(end_tag)
                             if defended_insert_pos != -1:
                                 defended_attacked_for_attn = (
                                     defended_prompt_for_attn[:defended_insert_pos]
-                                    + attack_suffix + end_tag_rp
+                                    + attack_suffix + end_tag
                                 )
                             else:
                                 defended_attacked_for_attn = defended_prompt_for_attn + attack_suffix
                         elif config.attack_method.lower() == "roleplay":
-                            end_tag_rp = "</student_answer>"
-                            rp_insert = defended_prompt_for_attn.rfind(end_tag_rp)
+                            rp_insert = defended_prompt_for_attn.rfind(end_tag)
                             if rp_insert != -1:
                                 defended_attacked_for_attn = (
                                     defended_prompt_for_attn[:rp_insert]
-                                    + attack_suffix + end_tag_rp
+                                    + attack_suffix + end_tag
                                 )
                             else:
                                 defended_attacked_for_attn = defended_prompt_for_attn + attack_suffix
@@ -474,19 +570,75 @@ class GradingDefensePipeline:
                         )
 
                     # ── Step 4: 记录结果 ──
+                    # Parse grades for output and progress printing
+                    from eval.metrics import _parse_grade as _pg
+                    orig_grade_int = _pg(original_resp, config.nclass)
+                    attacked_grade_int = _pg(attacked_resp, config.nclass)
+                    def_orig_grade_int = _pg(defended_original_resp or "", config.nclass)
+                    def_attacked_grade_int = _pg(defended_attacked_resp or "", config.nclass)
+
+                    sample_meta = {
+                        "defended_original_response": defended_original_resp,
+                        "defended_attacked_response": defended_attacked_resp,
+                        "rejected": rejected,
+                        "attention": attn_meta or None,
+                    }
+                    if bank_meta:
+                        sample_meta.update(bank_meta)
+
                     result = AttackResult(
                         student_qa_data=data,
                         original_response=original_resp,
                         attacked_response=attacked_resp,
-                        meta={
-                            "defended_original_response": defended_original_resp,
-                            "defended_attacked_response": defended_attacked_resp,
-                            "rejected": rejected,
-                            "attention": attn_meta or None,
-                        }
+                        meta=sample_meta,
                     )
-                    logger.result(result.as_dict())
-                    all_results.append(result.as_dict())
+                    result_dict = result.as_dict()
+
+                    # Enrich with flat top-level fields (matching HPC output format)
+                    result_dict["source_index"] = data_idx
+                    result_dict["original_grade"] = self._grade_label(orig_grade_int, config.nclass)
+                    result_dict["attacked_grade"] = self._grade_label(attacked_grade_int, config.nclass)
+                    if defended_original_resp:
+                        result_dict["defended_original_grade"] = self._grade_label(
+                            def_orig_grade_int, config.nclass
+                        )
+                    if defended_attacked_resp:
+                        result_dict["defended_attacked_grade"] = self._grade_label(
+                            def_attacked_grade_int, config.nclass
+                        )
+
+                    # Flatten bank_meta fields to top level for gcg_suffix_bank
+                    if bank_meta:
+                        result_dict["success"] = bank_meta.get("success_suffix_index") is not None
+                        result_dict["promotion_success"] = (
+                            bank_meta.get("promotion_suffix_index") is not None
+                        )
+                        for key in (
+                            "success_suffix_index", "success_suffix",
+                            "promotion_suffix_index", "promotion_suffix",
+                            "suffixes_tried", "bank_path", "bank_size",
+                        ):
+                            if key in bank_meta:
+                                result_dict[key] = bank_meta[key]
+
+                    logger.result(result_dict)
+                    all_results.append(result_dict)
+
+                    # ── Per-sample progress print ──
+                    sample_count += 1
+                    label = data.verification or "?"
+                    orig_str = self._grade_label(orig_grade_int, config.nclass)
+                    attacked_str = self._grade_label(attacked_grade_int, config.nclass)
+                    success_str = ""
+                    if bank_meta is not None:
+                        si = bank_meta.get("success_suffix_index")
+                        success_str = f" success={'yes' if si is not None else 'no'}"
+                    print(
+                        f"[{sample_count}/{total_samples}] source_idx={data_idx} "
+                        f"label={label} orig={orig_str} attacked={attacked_str}"
+                        f"{success_str}",
+                        flush=True,
+                    )
 
                 except Exception as e:
                     import traceback
@@ -562,6 +714,14 @@ class GradingDefensePipeline:
                         f"CAS={metrics.cas:.4f} "
                         f"CAS_defended={metrics.cas_defended:.4f}"
                     )
+                    print(
+                        f"\n[SUMMARY {data_config.name}] "
+                        f"QWK_clean={metrics.qwk_clean:.4f} "
+                        f"QWK_attack={metrics.qwk_attack:.4f} "
+                        f"ASR={metrics.asr:.4f} ({metrics.total_attack_eligible} eligible) "
+                        f"ASR_defended={metrics.asr_defended:.4f} ({metrics.total_defense_eligible} eligible)\n",
+                        flush=True,
+                    )
                 else:
                     logger.info(
                         f"[{config.model_config.name}] [{data_config.name}] "
@@ -569,6 +729,13 @@ class GradingDefensePipeline:
                         f"QWK_attack={metrics.qwk_attack:.4f} "
                         f"ASR={metrics.asr:.4f} "
                         f"CAS={metrics.cas:.4f}"
+                    )
+                    print(
+                        f"\n[SUMMARY {data_config.name}] "
+                        f"QWK_clean={metrics.qwk_clean:.4f} "
+                        f"QWK_attack={metrics.qwk_attack:.4f} "
+                        f"ASR={metrics.asr:.4f} ({metrics.total_attack_eligible} eligible)\n",
+                        flush=True,
                     )
 
                 # ── Step 6: 保存指标 + 配置摘要 ──
@@ -594,6 +761,43 @@ class GradingDefensePipeline:
                     print(f"[ERROR] Failed to save metrics: {e}", flush=True)
                     traceback.print_exc()
                     logger.info(f"Failed to save metrics: {e}")
+
+                # ── Step 6b: 后缀银行迁移指标 ──
+                if config.attack_method.lower() == "gcg_suffix_bank" and all_results:
+                    from eval.bank_metrics import compute_bank_transfer_metrics
+                    try:
+                        bank_metrics = compute_bank_transfer_metrics(
+                            all_results, nclass=config.nclass
+                        )
+                        bank_summary = bank_metrics.to_dict()
+                        bank_metrics_path = logger.metrics_path.replace(
+                            "_metrics.json", "_bank_metrics.json"
+                        )
+                        with open(bank_metrics_path, "w", encoding="utf-8") as f:
+                            json.dump(bank_summary, f, indent=2, ensure_ascii=False)
+                        logger.info(
+                            f"[{data_config.name}] "
+                            f"BankASR={bank_metrics.project_asr:.4f} "
+                            f"PromoASR={bank_metrics.promotion_asr:.4f} "
+                            f"TransferRate={bank_metrics.transfer_rate:.4f} "
+                            f"MeanIdx={bank_metrics.mean_success_index:.1f}"
+                        )
+                        logger.info(f"Bank metrics saved to {bank_metrics_path}")
+                        print(
+                            f"\n[BANK SUMMARY {data_config.name}] "
+                            f"BankSize={bank_metrics.bank_size} "
+                            f"TotalNonCorrect={bank_metrics.total_non_correct} "
+                            f"Eligible={bank_metrics.eligible_non_correct} "
+                            f"ProjectASR={bank_metrics.project_asr:.4f} "
+                            f"({bank_metrics.project_asr_success}/{bank_metrics.eligible_non_correct}) "
+                            f"PromoASR={bank_metrics.promotion_asr:.4f} "
+                            f"TransferRate={bank_metrics.transfer_rate:.4f} "
+                            f"MeanSuccessIdx={bank_metrics.mean_success_index:.1f}\n",
+                            flush=True,
+                        )
+                    except Exception as e:
+                        print(f"[ERROR] compute_bank_transfer_metrics failed: {e}", flush=True)
+                        logger.info(f"compute_bank_transfer_metrics failed: {e}")
 
             logger.info(
                 f"[MODEL] {config.model_config.name}  "
@@ -704,3 +908,86 @@ class GradingDefensePipeline:
                 if g == majority_grade:
                     return responses[i]
         return responses[0] if responses else ""
+
+    def _load_suffix_bank(self) -> list[str]:
+        """Load and cache the GCG suffix bank from config.params['bank_path'].
+
+        Supports .jsonl (one dict per line with 'best_string'/'suffix' key),
+        .json (list of strings or dict with 'suffixes'/'bank' key),
+        and .txt (one suffix per line).
+        """
+        if getattr(self, '_bank_cache', None) is not None:
+            return self._bank_cache
+        import json
+        from pathlib import Path
+
+        path = Path(self.config.params["bank_path"])
+        if not path.exists():
+            raise FileNotFoundError(f"Suffix bank not found: {path}")
+
+        suffixes: list[str] = []
+        if path.suffix == ".jsonl":
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        item = json.loads(line)
+                        sfx = self._suffix_from_item(item)
+                        if sfx:
+                            suffixes.append(sfx)
+        elif path.suffix == ".json":
+            data = json.loads(path.read_text(encoding="utf-8"))
+            items = data if isinstance(data, list) else data.get("suffixes", data.get("bank", []))
+            for item in items:
+                sfx = self._suffix_from_item(item)
+                if sfx:
+                    suffixes.append(sfx)
+        else:
+            # Plain text: one suffix per line
+            suffixes = [s.rstrip("\n") for s in path.read_text(encoding="utf-8").splitlines()]
+            suffixes = [s for s in suffixes if s.strip()]
+
+        deduped = list(dict.fromkeys(suffixes))  # preserve order
+        limit = self.config.params.get("bank_limit")
+        self._bank_cache = deduped[:limit] if limit else deduped
+        print(f"[pipeline] Loaded {len(self._bank_cache)} suffixes from bank: {path}", flush=True)
+        return self._bank_cache
+
+    @staticmethod
+    def _suffix_from_item(item) -> str | None:
+        """Extract suffix string from a bank entry dict."""
+        if isinstance(item, str):
+            return item
+        if not isinstance(item, dict):
+            return None
+        for key in ("suffix", "best_string", "gcg_suffix"):
+            if item.get(key):
+                return str(item[key])
+        return None
+
+    def _load_bank_source_indices(self) -> set[int]:
+        """Load source_index values from bank entries for heldout exclusion."""
+        if getattr(self, '_bank_source_indices_cache', None) is not None:
+            return self._bank_source_indices_cache
+        import json
+        from pathlib import Path
+
+        path = Path(self.config.params["bank_path"])
+        indices: set[int] = set()
+        if not path.exists() or path.suffix not in {".json", ".jsonl"}:
+            self._bank_source_indices_cache = indices
+            return indices
+        if path.suffix == ".jsonl":
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        item = json.loads(line)
+                        if isinstance(item, dict) and isinstance(item.get("source_index"), int):
+                            indices.add(item["source_index"])
+        else:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            items = data if isinstance(data, list) else data.get("suffixes", data.get("bank", []))
+            for item in items:
+                if isinstance(item, dict) and isinstance(item.get("source_index"), int):
+                    indices.add(item["source_index"])
+        self._bank_source_indices_cache = indices
+        return indices

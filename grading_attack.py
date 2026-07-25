@@ -98,6 +98,11 @@ class GradingAttack:
         elif config.attack_method.lower() == "roleplay":
             from baselines.roleplay.roleplay import RolePlay
             self.attack = RolePlay(config)
+        elif config.attack_method.lower() == "gcg_suffix_bank":
+            raise ValueError(
+                "gcg_suffix_bank requires pipeline_mode=True. "
+                "Set pipeline_mode: true in your config."
+            )
         else:
             raise ValueError(f"Not supported attack method {config.attack_method}")
 

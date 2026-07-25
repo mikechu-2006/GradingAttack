@@ -1,11 +1,19 @@
 """Evaluate transferability of a GCG suffix bank on ASAG samples.
 
+DEPRECATED: Use pipeline.py with method=gcg_suffix_bank and pipeline_mode=true
+instead. See configs/GCG-SuffixBank-Llama-3.1-8B-Instruct-3c.yaml for an
+example config.
+
+This script is kept for backward compatibility and quick ad-hoc evaluation.
+It will be removed in a future release.
+
 This script does not optimize new suffixes. It loads previously discovered
 suffixes, tries them on heldout samples, and stops at the first suffix that
 flips a non-correct sample to "correct".
 """
 
 from __future__ import annotations
+import warnings
 
 import argparse
 import json
@@ -208,6 +216,12 @@ def generate(model, tokenizer, prompt: str, device: str, max_tokens: int) -> str
 
 
 def main() -> None:
+    warnings.warn(
+        "eval_gcg_suffix_bank.py is deprecated. "
+        "Use pipeline.py with method: gcg_suffix_bank and pipeline_mode: true.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
