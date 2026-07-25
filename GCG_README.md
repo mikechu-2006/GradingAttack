@@ -163,6 +163,62 @@ transfer_rate_any_original = 291 / 292 = 99.66%
 The transfer script excludes suffix-bank source samples by default when the bank
 contains `source_index`.
 
+
+## No-Bank Ablation and Confusion Matrices
+
+To test whether the suffix bank itself is the main reason for high ASR, run the
+same heldout setting twice: once with the full bank and once with a single fixed
+suffix. Use the same `MAX_SAMPLES`, `RANDOM_SEED`, `NCLASS`, and `TEMPLATE_PATH`.
+When `BANK_PATH` is passed in fixed mode, the script still excludes the bank
+source samples so the two runs use the same heldout pool.
+
+Full suffix-bank version:
+
+```bash
+cd ~/GradingAttack
+
+NCLASS=3 TEMPLATE_PATH=configs/grading_template_ci_3c.txt \
+BANK_PATH=result/GCG/gcg_suffix_bank_3c_promotion.jsonl \
+MAX_SAMPLES=500 RANDOM_SEED=42 ATTACK_MODE=bank \
+OUTPUT_PATH=result/GCG/gcg_suffix_bank_transfer_3c_promotion_heldout500_cm.jsonl \
+sbatch hpc/run_gcg_suffix_bank_transfer.sh
+```
+
+No-bank fixed-suffix ablation:
+
+```bash
+cd ~/GradingAttack
+
+NCLASS=3 TEMPLATE_PATH=configs/grading_template_ci_3c.txt \
+BANK_PATH=result/GCG/gcg_suffix_bank_3c_promotion.jsonl \
+MAX_SAMPLES=500 RANDOM_SEED=42 ATTACK_MODE=fixed \
+OUTPUT_PATH=result/GCG/gcg_fixed_roleplay_no_bank_3c_heldout500_cm.jsonl \
+sbatch hpc/run_gcg_suffix_bank_transfer.sh
+```
+
+Optional single-GCG-suffix ablation, which uses only the first suffix in the
+bank rather than all five:
+
+```bash
+NCLASS=3 TEMPLATE_PATH=configs/grading_template_ci_3c.txt \
+BANK_PATH=result/GCG/gcg_suffix_bank_3c_promotion.jsonl \
+BANK_LIMIT=1 MAX_SAMPLES=500 RANDOM_SEED=42 ATTACK_MODE=bank \
+OUTPUT_PATH=result/GCG/gcg_suffix_bank_limit1_3c_heldout500_cm.jsonl \
+sbatch hpc/run_gcg_suffix_bank_transfer.sh
+```
+
+Each metrics JSON now includes:
+
+```text
+cm_clean                    true label x clean prediction
+cm_attack_best              true label x best attack prediction over available suffixes
+transition_clean_to_attack  clean prediction x best attack prediction
+```
+
+For the suffix-bank setting, `cm_attack_best` uses the most grade-inflating
+result found among the bank suffixes. For the no-bank setting, it is simply the
+result of that one fixed suffix.
+
 ## Run Defense Evaluation
 
 Run SelfReminder against the GCG suffix bank:

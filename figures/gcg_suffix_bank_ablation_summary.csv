@@ -1,0 +1,4 @@
+setting,samples,bank_size,project_asr,promotion_asr,clean_qwk_retention,note
+Fixed RolePlay suffix,500,1,0.0,0.5910780669144982,,No-bank ablation; one fixed RolePlay-style suffix
+GCG suffix bank,500,5,0.9962825278810409,1.0,,Five optimized suffixes tried on the same heldout pool
+GCG bank + ParaphraseDefense,500,5,0.36769759450171824,0.027491408934707903,1.3708702542729054,Same GCG bank under ParaphraseDefense

@@ -1,0 +1,19 @@
+experiment,matrix,row_label,correct,contradictory,incorrect
+GCG suffix bank,cm_clean,correct,77,26,105
+GCG suffix bank,cm_clean,contradictory,0,0,0
+GCG suffix bank,cm_clean,incorrect,23,79,190
+GCG suffix bank,cm_attack_best,correct,0,0,0
+GCG suffix bank,cm_attack_best,contradictory,0,0,0
+GCG suffix bank,cm_attack_best,incorrect,291,1,0
+GCG suffix bank,transition_clean_to_attack,correct,23,0,0
+GCG suffix bank,transition_clean_to_attack,contradictory,79,0,0
+GCG suffix bank,transition_clean_to_attack,incorrect,189,1,0
+Fixed RolePlay suffix,cm_clean,correct,77,26,105
+Fixed RolePlay suffix,cm_clean,contradictory,0,0,0
+Fixed RolePlay suffix,cm_clean,incorrect,23,79,190
+Fixed RolePlay suffix,cm_attack_best,correct,0,0,0
+Fixed RolePlay suffix,cm_attack_best,contradictory,0,0,0
+Fixed RolePlay suffix,cm_attack_best,incorrect,0,252,40
+Fixed RolePlay suffix,transition_clean_to_attack,correct,0,15,8
+Fixed RolePlay suffix,transition_clean_to_attack,contradictory,0,78,1
+Fixed RolePlay suffix,transition_clean_to_attack,incorrect,0,159,31

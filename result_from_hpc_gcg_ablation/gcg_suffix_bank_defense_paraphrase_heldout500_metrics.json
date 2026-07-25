@@ -1,0 +1,29 @@
+{
+  "defense": "paraphrase",
+  "nclass": 3,
+  "total_samples": 500,
+  "bank_size": 5,
+  "total_correct": 208,
+  "total_non_correct": 292,
+  "eligible_non_correct": 269,
+  "defended_eligible_non_correct": 291,
+  "project_asr_success": 268,
+  "defended_project_asr_success": 107,
+  "project_asr": 0.9962825278810409,
+  "defended_project_asr": 0.36769759450171824,
+  "asr_reduction": 0.6309303995486485,
+  "promotion_success": 269,
+  "defended_promotion_success": 8,
+  "promotion_asr": 1.0,
+  "defended_promotion_asr": 0.027491408934707903,
+  "qwk_clean": 0.2561604860876694,
+  "qwk_defense_clean": 0.3511627906976744,
+  "clean_qwk_retention": 1.3708702542729054,
+  "excluded_bank_source_indices": [
+    2980,
+    4531,
+    4654,
+    4856,
+    4888
+  ]
+}
