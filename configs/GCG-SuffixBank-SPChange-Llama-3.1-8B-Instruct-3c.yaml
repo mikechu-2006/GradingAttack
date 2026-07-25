@@ -1,0 +1,33 @@
+name: GCG-SuffixBank-SPChange-Llama-3.1-8B-Instruct-3c
+
+method: gcg_suffix_bank
+pipeline_mode: true
+debug: true
+nclass: 3
+template: ci
+
+params:
+  bank_path: result_from_hpc_gcg_suffix_bank/gcg_suffix_bank_3c_promotion.jsonl
+  bank_limit: null
+  exclude_bank_source_indices: true
+
+model:
+  name: Llama-3.1-8B-Instruct
+  model_id: "LLM-Research/Meta-Llama-3.1-8B-Instruct"
+
+data:
+  - name: scientsbank
+    path: ./dataset/scientsbank.jsonl
+    max_samples: 100
+    random_seed: 42
+
+generation:
+  temperature: 0.01
+  max_tokens: 1024
+
+defenses:
+  - type: system_prompt_change
+
+log:
+  log_dir: ./logs
+  result_dir: ./result

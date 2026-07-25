@@ -27,3 +27,6 @@ class SelfReminder(BaseDefense):
 
     def pre_process(self, prompt: str) -> str:
         return self.reminder + prompt
+
+    def is_structural_preprocessing(self) -> bool:
+        return True

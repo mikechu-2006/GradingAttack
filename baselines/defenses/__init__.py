@@ -5,3 +5,4 @@ from .self_reminder import SelfReminder
 from .paraphrase import ParaphraseDefense
 from .attention_sharpening import AttentionSharpening
 from .hijacking_suppression import HijackingSuppression
+from .system_prompt_change import SystemPromptChange

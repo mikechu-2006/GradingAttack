@@ -56,3 +56,17 @@ class BaseDefense(ABC):
     def uninstall_model_hooks(self, handles) -> None:
         for remove in handles:
             remove()
+
+    def is_structural_preprocessing(self) -> bool:
+        """Whether this defense structurally modifies the prompt text and
+        should be visible to the attacker during attack optimization.
+
+        Structural pre-processing defenses (SelfReminder, SystemPromptChange)
+        are applied BEFORE the attack step so the attacker sees the hardened
+        prompt — matching the white-box threat model where the attacker knows
+        the full system prompt.
+
+        Returns False by default. Override to return True for defenses that
+        add/restructure prompt text (not runtime filtering or rewriting).
+        """
+        return False
