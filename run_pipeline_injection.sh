@@ -7,8 +7,8 @@
 #SBATCH -t 7-00:00:00
 
 # Default: Delimiter Confusion (DC) strategy — XML structure exploit
-python main.py --pipeline configs/Injection-DC-Llama-3.1-8B-Instruct-cluster.yaml
+python main.py --pipeline configs/injection/dc-cluster-2c.yaml
 
 # Alternative strategies — uncomment to run instead:
-# python main.py --pipeline configs/Injection-AO-Llama-3.1-8B-Instruct-cluster.yaml
-# python main.py --pipeline configs/Injection-IM-Llama-3.1-8B-Instruct-cluster.yaml
+# python main.py --pipeline configs/injection/ao-cluster-2c.yaml
+# python main.py --pipeline configs/injection/im-cluster-2c.yaml

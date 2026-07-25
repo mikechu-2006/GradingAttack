@@ -7,4 +7,4 @@
 #SBATCH -t 7-00:00:00
 
 # Instruction Mimicry (IM) — system-prompt style matching
-python main.py --pipeline configs/Injection-IM-Llama-3.1-8B-Instruct-cluster.yaml
+python main.py --pipeline configs/injection/im-cluster-2c.yaml
