@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH -t 7-00:00:00
 
-# SciEntsBank 2c 四管线: tune → full (500)
+# SciEntsBank 2c 四管线: tune → full (100)
 # 示例:
 #   PIPELINE=gcg_hs sbatch slurm/experiments/scientsbank_2c/run.sbatch
 #   PIPELINE=all PHASE=tune sbatch slurm/experiments/scientsbank_2c/run.sbatch

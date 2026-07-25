@@ -183,6 +183,7 @@ def compute_metrics(
     beta: float = 0.5,
     gamma: float = 0.5,
     c: float = 0.99,
+    print_confusion_matrix: bool = True,
 ) -> EvalMetrics:
     total = len(results)
     if total == 0:
@@ -250,39 +251,40 @@ def compute_metrics(
             c,
         )
 
-    print("\n" + "=" * 56)
-    print("  [CLEAN] Confusion Matrix")
-    print("=" * 56)
-    print(_format_cm(cm_clean, nclass))
-    print(f"  QWK = {qwk_clean:.4f}")
-
-    print("\n" + "=" * 56)
-    print("  [ATTACK] Confusion Matrix")
-    print("=" * 56)
-    print(_format_cm(cm_attack, nclass))
-    print(
-        f"  QWK = {qwk_attack:.4f}  |  ASR = {asr:.4f}  |  "
-        f"CAS = {cas:.4f}  |  eligible = {attack_eligible}"
-    )
-
-    if has_defense:
+    if print_confusion_matrix:
         print("\n" + "=" * 56)
-        print("  [DEFENSE-CLEAN] Confusion Matrix")
+        print("  [CLEAN] Confusion Matrix")
         print("=" * 56)
-        print(_format_cm(cm_defense_clean, nclass))
-        print(f"  QWK = {qwk_defense_clean:.4f}")
+        print(_format_cm(cm_clean, nclass))
+        print(f"  QWK = {qwk_clean:.4f}")
 
         print("\n" + "=" * 56)
-        print("  [DEFENSE-ATTACK] Confusion Matrix")
+        print("  [ATTACK] Confusion Matrix")
         print("=" * 56)
-        print(_format_cm(cm_defense_attack, nclass))
+        print(_format_cm(cm_attack, nclass))
         print(
-            f"  QWK = {qwk_defense_attack:.4f}  |  "
-            f"ASR = {asr_defended:.4f}  |  CAS = {cas_defended:.4f}  |  "
-            f"eligible = {defense_eligible}"
+            f"  QWK = {qwk_attack:.4f}  |  ASR = {asr:.4f}  |  "
+            f"CAS = {cas:.4f}  |  eligible = {attack_eligible}"
         )
 
-    print("=" * 56)
+        if has_defense:
+            print("\n" + "=" * 56)
+            print("  [DEFENSE-CLEAN] Confusion Matrix")
+            print("=" * 56)
+            print(_format_cm(cm_defense_clean, nclass))
+            print(f"  QWK = {qwk_defense_clean:.4f}")
+
+            print("\n" + "=" * 56)
+            print("  [DEFENSE-ATTACK] Confusion Matrix")
+            print("=" * 56)
+            print(_format_cm(cm_defense_attack, nclass))
+            print(
+                f"  QWK = {qwk_defense_attack:.4f}  |  "
+                f"ASR = {asr_defended:.4f}  |  CAS = {cas_defended:.4f}  |  "
+                f"eligible = {defense_eligible}"
+            )
+
+        print("=" * 56)
 
     return EvalMetrics(
         nclass=nclass,

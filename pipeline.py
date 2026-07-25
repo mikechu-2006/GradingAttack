@@ -120,6 +120,11 @@ class GradingDefensePipeline:
             return labels[grade_int]
         return "unknown"
 
+    @staticmethod
+    def _gt_is_correct(data) -> bool:
+        """Ground-truth correct samples are not evaluated on attack paths."""
+        return (getattr(data, "verification", None) or "").strip().lower() == "correct"
+
     def _log_sample_verdict(
         self,
         logger: GradingAttackLogger,
@@ -129,15 +134,21 @@ class GradingDefensePipeline:
         attacked_resp: str,
         defended_original_resp: Optional[str],
         defended_attacked_resp: Optional[str],
+        skip_attack_eval: bool = False,
     ) -> None:
         lines = [
             f"[SAMPLE] idx={data_idx} qid={data.question_id} gt={data.verification}",
             f"  original={self._verdict_label(original_resp)}",
-            f"  attacked={self._verdict_label(attacked_resp)}",
         ]
+        if skip_attack_eval:
+            lines.append("  attacked=skipped (GT=correct)")
+        else:
+            lines.append(f"  attacked={self._verdict_label(attacked_resp)}")
         if defended_original_resp is not None:
             lines.append(f"  defense_clean={self._verdict_label(defended_original_resp)}")
-        if defended_attacked_resp is not None:
+        if skip_attack_eval:
+            lines.append("  defense_attacked=skipped (GT=correct)")
+        elif defended_attacked_resp is not None:
             lines.append(f"  defense_attacked={self._verdict_label(defended_attacked_resp)}")
         for line in lines:
             print(line, flush=True)
@@ -267,145 +278,156 @@ class GradingDefensePipeline:
                             attn_meta["clean"] = attention_summary_to_dict(s)
                     original_resp = self._generate(messages)
 
-                    # ── Step 2: 攻击推理 ──
+                    # GT=correct: skip attack + defense-attack (ASR/eval only targets incorrect GT)
+                    end_tag = "</student_answer>"
+                    skip_attack_eval = self._gt_is_correct(data)
                     attacked_messages = [{"role": "user", "content": prompt}]
                     attack_suffix = ""
-                    end_tag = "</student_answer>"
-                    bank_meta = None  # populated by gcg_suffix_bank branch
-                    if config.attack_method.lower() == "gcg":
-                        import time
-                        import nanogcg
-                        target = config.params["target"]
-                        gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
+                    bank_meta = None
+                    attacked_resp = original_resp
 
-                        # 过滤 Llama reserved_special_token（默认过滤不覆盖这类 token）
-                        import nanogcg.utils as _ncg_utils
-                        _orig_get_nonascii_toks = _ncg_utils.get_nonascii_toks
-                        def _patched_get_nonascii_toks(tokenizer, device="cpu"):
-                            not_allowed = _orig_get_nonascii_toks(tokenizer, device)
-                            reserved_ids = [
-                                tid for tok, tid in tokenizer.get_vocab().items()
-                                if tok.startswith("<|reserved_special_token_")
-                            ]
-                            if reserved_ids:
-                                not_allowed = torch.cat([
-                                    not_allowed,
-                                    torch.tensor(reserved_ids, device=device),
-                                ])
-                            return not_allowed
-                        _ncg_utils.get_nonascii_toks = _patched_get_nonascii_toks
-                        # Blind prompt for GCG optimization (no solution)
-                        blind_prompt = config.grading_template.format(
-                            question=data.question,
-                            solution="",
-                            student_answer=data.student_answer,
-                        )
-                        blind_insert_pos = blind_prompt.rfind(end_tag)
-                        if blind_insert_pos != -1:
-                            blind_gcq_prompt = blind_prompt[:blind_insert_pos]
-                            t_start = time.perf_counter()
-                            gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                     [{"role": "user", "content": blind_gcq_prompt}],
-                                                     target, gcg_config)
-                            t_end = time.perf_counter()
-                            attack_suffix = gcg_result.best_string
-                            full_insert_pos = prompt.rfind(end_tag)
-                            attacked_messages[0]["content"] = prompt[:full_insert_pos] + attack_suffix + end_tag
-                        else:
-                            t_start = time.perf_counter()
-                            gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                     [{"role": "user", "content": blind_prompt}],
-                                                     target, gcg_config)
-                            t_end = time.perf_counter()
-                            attack_suffix = gcg_result.best_string
-                            attacked_messages[0]["content"] = prompt + attack_suffix
-                        print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
-                    elif config.attack_method.lower() == "roleplay":
-                        attack_suffix = config.params["adv_prompt"]
-                        insert_pos = prompt.rfind(end_tag)
-                        if insert_pos != -1:
-                            attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
-                        else:
-                            attacked_messages[0]["content"] = prompt + attack_suffix
-                    elif config.attack_method.lower() == "gcg_suffix_bank":
-                        import time as _sbtime
-                        from eval.metrics import _parse_grade
-
-                        t_start = _sbtime.perf_counter()
-                        # Defaults: no suffix succeeds
-                        attacked_resp = original_resp
-                        attack_suffix = ""
-                        success_suffix_index = None
-                        success_suffix = None
-                        promotion_suffix_index = None
-                        promotion_suffix = None
-                        suffixes_tried = 0
-                        insert_pos_sb = prompt.rfind(end_tag)
-                        original_grade_for_bank = _parse_grade(original_resp, config.nclass)
-
-                        for suffix_idx, suffix in enumerate(bank):
-                            suffixes_tried += 1
-                            if insert_pos_sb != -1:
-                                test_content = prompt[:insert_pos_sb] + suffix + end_tag
-                            else:
-                                test_content = prompt + suffix
-
-                            test_resp = self._generate(
-                                [{"role": "user", "content": test_content}]
-                            )
-                            test_grade = _parse_grade(test_resp, config.nclass)
-
-                            # Track first promotion (any grade improvement)
-                            if (original_grade_for_bank is not None
-                                    and test_grade is not None
-                                    and test_grade < original_grade_for_bank
-                                    and promotion_suffix_index is None):
-                                promotion_suffix_index = suffix_idx
-                                promotion_suffix = suffix
-
-                            # Early stop on correct flip
-                            if test_grade == 0:  # 0 = correct
-                                attacked_resp = test_resp
-                                attack_suffix = suffix
-                                success_suffix_index = suffix_idx
-                                success_suffix = suffix
-                                attacked_messages[0]["content"] = test_content
-                                break
-
-                        t_end = _sbtime.perf_counter()
+                    if skip_attack_eval:
                         print(
-                            f"[SuffixBank] Tried {suffixes_tried}/{len(bank)} suffixes "
-                            f"in {t_end - t_start:.1f}s, "
-                            f"success_idx={success_suffix_index}, "
-                            f"promotion_idx={promotion_suffix_index}",
+                            f"[pipeline] Skipping attack/defense-attack for sample {data_idx}: "
+                            f"GT=correct",
                             flush=True,
                         )
+                    else:
+                        # ── Step 2: 攻击推理 ──
+                        if config.attack_method.lower() == "gcg":
+                            import time
+                            import nanogcg
+                            target = config.params["target"]
+                            gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
 
-                        bank_meta = {
-                            "success_suffix_index": success_suffix_index,
-                            "success_suffix": success_suffix,
-                            "promotion_suffix_index": promotion_suffix_index,
-                            "promotion_suffix": promotion_suffix,
-                            "suffixes_tried": suffixes_tried,
-                            "bank_path": config.params.get("bank_path"),
-                            "bank_size": len(bank),
-                        }
+                            # 过滤 Llama reserved_special_token（默认过滤不覆盖这类 token）
+                            import nanogcg.utils as _ncg_utils
+                            _orig_get_nonascii_toks = _ncg_utils.get_nonascii_toks
+                            def _patched_get_nonascii_toks(tokenizer, device="cpu"):
+                                not_allowed = _orig_get_nonascii_toks(tokenizer, device)
+                                reserved_ids = [
+                                    tid for tok, tid in tokenizer.get_vocab().items()
+                                    if tok.startswith("<|reserved_special_token_")
+                                ]
+                                if reserved_ids:
+                                    not_allowed = torch.cat([
+                                        not_allowed,
+                                        torch.tensor(reserved_ids, device=device),
+                                    ])
+                                return not_allowed
+                            _ncg_utils.get_nonascii_toks = _patched_get_nonascii_toks
+                            # Blind prompt for GCG optimization (no solution)
+                            blind_prompt = config.grading_template.format(
+                                question=data.question,
+                                solution="",
+                                student_answer=data.student_answer,
+                            )
+                            blind_insert_pos = blind_prompt.rfind(end_tag)
+                            if blind_insert_pos != -1:
+                                blind_gcq_prompt = blind_prompt[:blind_insert_pos]
+                                t_start = time.perf_counter()
+                                gcg_result = nanogcg.run(self.model, self.tokenizer,
+                                                         [{"role": "user", "content": blind_gcq_prompt}],
+                                                         target, gcg_config)
+                                t_end = time.perf_counter()
+                                attack_suffix = gcg_result.best_string
+                                full_insert_pos = prompt.rfind(end_tag)
+                                attacked_messages[0]["content"] = prompt[:full_insert_pos] + attack_suffix + end_tag
+                            else:
+                                t_start = time.perf_counter()
+                                gcg_result = nanogcg.run(self.model, self.tokenizer,
+                                                         [{"role": "user", "content": blind_prompt}],
+                                                         target, gcg_config)
+                                t_end = time.perf_counter()
+                                attack_suffix = gcg_result.best_string
+                                attacked_messages[0]["content"] = prompt + attack_suffix
+                            print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
+                        elif config.attack_method.lower() == "roleplay":
+                            attack_suffix = config.params["adv_prompt"]
+                            insert_pos = prompt.rfind(end_tag)
+                            if insert_pos != -1:
+                                attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
+                            else:
+                                attacked_messages[0]["content"] = prompt + attack_suffix
+                        elif config.attack_method.lower() == "gcg_suffix_bank":
+                            import time as _sbtime
+                            from eval.metrics import _parse_grade
 
-                    if self._should_log_attention():
-                        s = self._analyze_attention(
-                            attacked_messages[0]["content"],
-                            "[ATTACKED]",
-                            logger,
-                            gcg_suffix=attack_suffix,
-                            sample_idx=data_idx,
-                        )
-                        if s is not None:
-                            attacked_attn_summaries.append(s)
-                            from utils.attention_utils import attention_summary_to_dict
-                            attn_meta["attacked"] = attention_summary_to_dict(s)
-                    # gcg_suffix_bank generates inside its branch (multi-suffix iteration)
-                    if config.attack_method.lower() != "gcg_suffix_bank":
-                        attacked_resp = self._generate(attacked_messages)
+                            t_start = _sbtime.perf_counter()
+                            # Defaults: no suffix succeeds
+                            attacked_resp = original_resp
+                            attack_suffix = ""
+                            success_suffix_index = None
+                            success_suffix = None
+                            promotion_suffix_index = None
+                            promotion_suffix = None
+                            suffixes_tried = 0
+                            insert_pos_sb = prompt.rfind(end_tag)
+                            original_grade_for_bank = _parse_grade(original_resp, config.nclass)
+
+                            for suffix_idx, suffix in enumerate(bank):
+                                suffixes_tried += 1
+                                if insert_pos_sb != -1:
+                                    test_content = prompt[:insert_pos_sb] + suffix + end_tag
+                                else:
+                                    test_content = prompt + suffix
+
+                                test_resp = self._generate(
+                                    [{"role": "user", "content": test_content}]
+                                )
+                                test_grade = _parse_grade(test_resp, config.nclass)
+
+                                # Track first promotion (any grade improvement)
+                                if (original_grade_for_bank is not None
+                                        and test_grade is not None
+                                        and test_grade < original_grade_for_bank
+                                        and promotion_suffix_index is None):
+                                    promotion_suffix_index = suffix_idx
+                                    promotion_suffix = suffix
+
+                                # Early stop on correct flip
+                                if test_grade == 0:  # 0 = correct
+                                    attacked_resp = test_resp
+                                    attack_suffix = suffix
+                                    success_suffix_index = suffix_idx
+                                    success_suffix = suffix
+                                    attacked_messages[0]["content"] = test_content
+                                    break
+
+                            t_end = _sbtime.perf_counter()
+                            print(
+                                f"[SuffixBank] Tried {suffixes_tried}/{len(bank)} suffixes "
+                                f"in {t_end - t_start:.1f}s, "
+                                f"success_idx={success_suffix_index}, "
+                                f"promotion_idx={promotion_suffix_index}",
+                                flush=True,
+                            )
+
+                            bank_meta = {
+                                "success_suffix_index": success_suffix_index,
+                                "success_suffix": success_suffix,
+                                "promotion_suffix_index": promotion_suffix_index,
+                                "promotion_suffix": promotion_suffix,
+                                "suffixes_tried": suffixes_tried,
+                                "bank_path": config.params.get("bank_path"),
+                                "bank_size": len(bank),
+                            }
+
+                        if self._should_log_attention():
+                            s = self._analyze_attention(
+                                attacked_messages[0]["content"],
+                                "[ATTACKED]",
+                                logger,
+                                gcg_suffix=attack_suffix,
+                                sample_idx=data_idx,
+                            )
+                            if s is not None:
+                                attacked_attn_summaries.append(s)
+                                from utils.attention_utils import attention_summary_to_dict
+                                attn_meta["attacked"] = attention_summary_to_dict(s)
+                        # gcg_suffix_bank generates inside its branch (multi-suffix iteration)
+                        if config.attack_method.lower() != "gcg_suffix_bank":
+                            attacked_resp = self._generate(attacked_messages)
 
                     # ── Step 3: 防御推理 ──
                     defended_original_resp = None
@@ -421,11 +443,12 @@ class GradingDefensePipeline:
                                         prompt,
                                         "",
                                     )
-                                    defended_attacked_resp = self._generate_with_defense_hooks(
-                                        attacked_messages,
-                                        attacked_messages[0]["content"],
-                                        attack_suffix,
-                                    )
+                                    if not skip_attack_eval:
+                                        defended_attacked_resp = self._generate_with_defense_hooks(
+                                            attacked_messages,
+                                            attacked_messages[0]["content"],
+                                            attack_suffix,
+                                        )
                                 else:
                                     hook_removers = self._install_defense_hooks(
                                         prompt, attack_suffix
@@ -434,18 +457,20 @@ class GradingDefensePipeline:
                                         defended_original_resp = self._generate_with_voting(
                                             [{"role": "user", "content": prompt}]
                                         )
-                                        defended_attacked_resp = self._generate_with_voting(
-                                            attacked_messages
-                                        )
+                                        if not skip_attack_eval:
+                                            defended_attacked_resp = self._generate_with_voting(
+                                                attacked_messages
+                                            )
                                     finally:
                                         self._remove_defense_hooks(hook_removers)
                                 for d in self.defenses:
                                     defended_original_resp = d.post_process(
                                         defended_original_resp or ""
                                     )
-                                    defended_attacked_resp = d.post_process(
-                                        defended_attacked_resp or ""
-                                    )
+                                    if not skip_attack_eval:
+                                        defended_attacked_resp = d.post_process(
+                                            defended_attacked_resp or ""
+                                        )
                             else:
                                 defended_prompt = prompt
                                 for d in self.defenses:
@@ -478,11 +503,12 @@ class GradingDefensePipeline:
                                         defended_prompt,
                                         "",
                                     )
-                                    defended_attacked_resp = self._generate_with_defense_hooks(
-                                        [{"role": "user", "content": defended_attacked_content}],
-                                        defended_attacked_content,
-                                        attack_suffix,
-                                    )
+                                    if not skip_attack_eval:
+                                        defended_attacked_resp = self._generate_with_defense_hooks(
+                                            [{"role": "user", "content": defended_attacked_content}],
+                                            defended_attacked_content,
+                                            attack_suffix,
+                                        )
                                 else:
                                     hook_removers = self._install_defense_hooks(
                                         defended_prompt, attack_suffix
@@ -491,9 +517,10 @@ class GradingDefensePipeline:
                                         defended_original_resp = self._generate(
                                             [{"role": "user", "content": defended_prompt}]
                                         )
-                                        defended_attacked_resp = self._generate(
-                                            [{"role": "user", "content": defended_attacked_content}]
-                                        )
+                                        if not skip_attack_eval:
+                                            defended_attacked_resp = self._generate(
+                                                [{"role": "user", "content": defended_attacked_content}]
+                                            )
                                     finally:
                                         self._remove_defense_hooks(hook_removers)
 
@@ -501,9 +528,10 @@ class GradingDefensePipeline:
                                     defended_original_resp = d.post_process(
                                         defended_original_resp or ""
                                     )
-                                    defended_attacked_resp = d.post_process(
-                                        defended_attacked_resp or ""
-                                    )
+                                    if not skip_attack_eval:
+                                        defended_attacked_resp = d.post_process(
+                                            defended_attacked_resp or ""
+                                        )
 
                         except DefenseRejectException:
                             rejected = True
@@ -545,18 +573,19 @@ class GradingDefensePipeline:
                         )
                         if s is not None:
                             attn_meta["defense_clean"] = attention_summary_to_dict(s)
-                        s = self._analyze_attention(
-                            defended_attacked_for_attn,
-                            "[DEFENSE-ATTACKED]",
-                            logger,
-                            gcg_suffix=attack_suffix,
-                            sample_idx=data_idx,
-                            with_defense_hooks=True,
-                            hook_prompt_content=prompt,
-                            hook_attack_suffix=attack_suffix,
-                        )
-                        if s is not None:
-                            attn_meta["defense_attacked"] = attention_summary_to_dict(s)
+                        if not skip_attack_eval:
+                            s = self._analyze_attention(
+                                defended_attacked_for_attn,
+                                "[DEFENSE-ATTACKED]",
+                                logger,
+                                gcg_suffix=attack_suffix,
+                                sample_idx=data_idx,
+                                with_defense_hooks=True,
+                                hook_prompt_content=prompt,
+                                hook_attack_suffix=attack_suffix,
+                            )
+                            if s is not None:
+                                attn_meta["defense_attacked"] = attention_summary_to_dict(s)
 
                     if self._should_log_attention():
                         self._log_sample_verdict(
@@ -567,6 +596,7 @@ class GradingDefensePipeline:
                             attacked_resp,
                             defended_original_resp,
                             defended_attacked_resp,
+                            skip_attack_eval=skip_attack_eval,
                         )
 
                     # ── Step 4: 记录结果 ──
@@ -582,6 +612,7 @@ class GradingDefensePipeline:
                         "defended_attacked_response": defended_attacked_resp,
                         "rejected": rejected,
                         "attention": attn_meta or None,
+                        "skip_attack_eval": skip_attack_eval,
                     }
                     if bank_meta:
                         sample_meta.update(bank_meta)
@@ -628,7 +659,10 @@ class GradingDefensePipeline:
                     sample_count += 1
                     label = data.verification or "?"
                     orig_str = self._grade_label(orig_grade_int, config.nclass)
-                    attacked_str = self._grade_label(attacked_grade_int, config.nclass)
+                    if skip_attack_eval:
+                        attacked_str = "skipped"
+                    else:
+                        attacked_str = self._grade_label(attacked_grade_int, config.nclass)
                     success_str = ""
                     if bank_meta is not None:
                         si = bank_meta.get("success_suffix_index")
@@ -695,7 +729,11 @@ class GradingDefensePipeline:
                     flat_results.append(flat_r)
 
                 try:
-                    metrics: EvalMetrics = compute_metrics(flat_results, nclass=config.nclass)
+                    metrics: EvalMetrics = compute_metrics(
+                        flat_results,
+                        nclass=config.nclass,
+                        print_confusion_matrix=config.log_attention,
+                    )
                 except Exception as e:
                     import traceback
                     print(f"[ERROR] compute_metrics failed: {e}", flush=True)
