@@ -1,0 +1,57 @@
+{
+  "nclass": 2,
+  "qwk_clean": 0.41793808977864,
+  "qwk_attack": 0.12116573113341278,
+  "qwk_defense_clean": 0.4033518367924195,
+  "qwk_defense_attack": 0.13343254902699542,
+  "cm_clean": [
+    [
+      95,
+      112
+    ],
+    [
+      20,
+      273
+    ]
+  ],
+  "cm_attack": [
+    [
+      24,
+      183
+    ],
+    [
+      3,
+      290
+    ]
+  ],
+  "cm_defense_clean": [
+    [
+      92,
+      115
+    ],
+    [
+      20,
+      273
+    ]
+  ],
+  "cm_defense_attack": [
+    [
+      27,
+      180
+    ],
+    [
+      4,
+      289
+    ]
+  ],
+  "asr": 0.0,
+  "asr_defended": 0.0,
+  "cas": 0.0,
+  "cas_defended": 0.0,
+  "total": 500,
+  "total_correct": 207,
+  "total_incorrect": 293,
+  "source_jsonl": "D:\\nya\\AIAA4313\\Project\\GradingAttack\\result\\experiments\\scientsbank_2c\\roleplay_as\\scientsbank-2c-rp-as-full_202607250403.jsonl",
+  "asr_reduction": 0.0,
+  "qwk_clean_reduction": 0.014586252986220516
+}
