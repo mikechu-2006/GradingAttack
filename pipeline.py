@@ -237,21 +237,22 @@ class GradingDefensePipeline:
                 )
 
         for data_config in config.data_config:
-            data_list = read_student_qa_data_from_jsonl(data_config.path)
-            if data_config.max_samples and data_config.max_samples < len(data_list):
+            full_data_list = read_student_qa_data_from_jsonl(data_config.path)
+            indexed_samples = list(enumerate(full_data_list))
+            if data_config.max_samples and data_config.max_samples < len(indexed_samples):
                 rng = random.Random(data_config.random_seed)
-                data_list = rng.sample(data_list, data_config.max_samples)
+                indexed_samples = rng.sample(indexed_samples, data_config.max_samples)
             all_results = []
             clean_attn_summaries = []
             attacked_attn_summaries = []
-            total_samples = len(data_list)
+            total_samples = len(indexed_samples)
             sample_count = 0  # running counter for non-excluded samples
 
-            for data_idx, data in enumerate(data_list):
+            for source_index, data in indexed_samples:
                 # Skip bank-source samples for fair transfer evaluation
-                if bank_source_indices and data_idx in bank_source_indices:
+                if bank_source_indices and source_index in bank_source_indices:
                     print(
-                        f"[pipeline] Skipping sample {data_idx}: "
+                        f"[pipeline] Skipping sample source_index={source_index}: "
                         f"found in bank source indices",
                         flush=True,
                     )
@@ -270,7 +271,7 @@ class GradingDefensePipeline:
                     if self._should_log_attention():
                         s = self._analyze_attention(
                             prompt, "[CLEAN]", logger,
-                            sample_idx=data_idx,
+                            sample_idx=source_index,
                         )
                         if s is not None:
                             clean_attn_summaries.append(s)
@@ -288,7 +289,7 @@ class GradingDefensePipeline:
 
                     if skip_attack_eval:
                         print(
-                            f"[pipeline] Skipping attack/defense-attack for sample {data_idx}: "
+                            f"[pipeline] Skipping attack/defense-attack for sample {source_index}: "
                             f"GT=correct",
                             flush=True,
                         )
@@ -426,7 +427,7 @@ class GradingDefensePipeline:
                                 "[ATTACKED]",
                                 logger,
                                 gcg_suffix=attack_suffix,
-                                sample_idx=data_idx,
+                                sample_idx=source_index,
                             )
                             if s is not None:
                                 attacked_attn_summaries.append(s)
@@ -591,7 +592,7 @@ class GradingDefensePipeline:
                             defended_prompt_for_attn,
                             "[DEFENSE-CLEAN]",
                             logger,
-                            sample_idx=data_idx,
+                            sample_idx=source_index,
                             with_defense_hooks=True,
                             hook_prompt_content=prompt,
                             hook_attack_suffix="",
@@ -604,7 +605,7 @@ class GradingDefensePipeline:
                                 "[DEFENSE-ATTACKED]",
                                 logger,
                                 gcg_suffix=attack_suffix,
-                                sample_idx=data_idx,
+                                sample_idx=source_index,
                                 with_defense_hooks=True,
                                 hook_prompt_content=prompt,
                                 hook_attack_suffix=attack_suffix,
@@ -615,7 +616,7 @@ class GradingDefensePipeline:
                     if self._should_log_attention():
                         self._log_sample_verdict(
                             logger,
-                            data_idx,
+                            source_index,
                             data,
                             original_resp,
                             attacked_resp,
@@ -651,7 +652,7 @@ class GradingDefensePipeline:
                     result_dict = result.as_dict()
 
                     # Enrich with flat top-level fields (matching HPC output format)
-                    result_dict["source_index"] = data_idx
+                    result_dict["source_index"] = source_index
                     result_dict["original_grade"] = self._grade_label(orig_grade_int, config.nclass)
                     result_dict["attacked_grade"] = self._grade_label(attacked_grade_int, config.nclass)
                     if defended_original_resp:
@@ -693,7 +694,7 @@ class GradingDefensePipeline:
                         si = bank_meta.get("success_suffix_index")
                         success_str = f" success={'yes' if si is not None else 'no'}"
                     print(
-                        f"[{sample_count}/{total_samples}] source_idx={data_idx} "
+                        f"[{sample_count}/{total_samples}] source_idx={source_index} "
                         f"label={label} orig={orig_str} attacked={attacked_str}"
                         f"{success_str}",
                         flush=True,
@@ -701,7 +702,7 @@ class GradingDefensePipeline:
 
                 except Exception as e:
                     import traceback
-                    print(f"[ERROR] Sample {data_idx} failed: {e}", flush=True)
+                    print(f"[ERROR] Sample {source_index} failed: {e}", flush=True)
                     traceback.print_exc()
 
             # ── 打印 attention 平均统计 ──
