@@ -1,6 +1,7 @@
 from baselines.defenses import (
     PerplexityFilter, SmoothLLM, SelfReminder,
     ParaphraseDefense, AttentionSharpening, HijackingSuppression, BaseDefense,
+    SystemPromptChange,
 )
 from utils.config_utils import AttackConfig
 
@@ -80,6 +81,11 @@ def _build_defenses(config: AttackConfig, model=None, tokenizer=None):
                 beta=dc.params.get("beta", 0.1),
                 top_fraction=dc.params.get("top_fraction", 0.01),
                 layers=dc.params.get("layers", "all"),
+            ))
+        elif t == "systempromptchange":
+            defenses.append(SystemPromptChange(
+                pre_instruction=dc.params.get("pre_instruction", None),
+                post_reminder=dc.params.get("post_reminder", None),
             ))
         else:
             raise ValueError(f"Unknown defense type: {dc.type}")

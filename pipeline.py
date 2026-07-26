@@ -60,11 +60,19 @@ class GradingDefensePipeline:
             "cuda" if torch.cuda.is_available() else "cpu"
         )
 
+        # Structural pre-processing defenses: modify the prompt text and must
+        # be visible to the attacker during optimization (white-box threat model).
+        self.structural_defenses = [d for d in self.defenses
+                                    if d.is_structural_preprocessing()]
+        # Runtime defenses: everything else (filtering, rewriting, hooks, voting).
+        self.runtime_defenses = [d for d in self.defenses
+                                  if not d.is_structural_preprocessing()]
+
         # 检查是否有 SmoothLLM 类需要多次推理的防御
-        self.multi_gen_defenses = [d for d in self.defenses
+        self.multi_gen_defenses = [d for d in self.runtime_defenses
                                    if d.requires_multiple_generations()]
         self.context_aware_defenses = any(
-            d.requires_inference_context() for d in self.defenses
+            d.requires_inference_context() for d in self.runtime_defenses
         )
 
     def _should_log_attention(self) -> bool:
@@ -82,7 +90,7 @@ class GradingDefensePipeline:
         hook_attack_suffix: str = "",
     ):
         removers = []
-        if with_defense_hooks and self.defenses:
+        if with_defense_hooks and self.runtime_defenses:
             removers = self._install_defense_hooks(
                 hook_prompt_content or prompt_text,
                 hook_attack_suffix,
@@ -156,7 +164,7 @@ class GradingDefensePipeline:
 
     def _install_defense_hooks(self, prompt_content: str, attack_suffix: str) -> list:
         removers = []
-        for d in self.defenses:
+        for d in self.runtime_defenses:
             if d.requires_inference_context():
                 d.set_inference_context(
                     self.tokenizer, prompt_content, attack_suffix
@@ -207,7 +215,7 @@ class GradingDefensePipeline:
         # 如果未传入 model，在此加载 (RolePlay 用 vLLM 则不需)
         if self.model is None:
             load_kwargs = dict(trust_remote_code=True, torch_dtype=torch.bfloat16)
-            if any(d.requires_model_hooks() for d in self.defenses):
+            if any(d.requires_model_hooks() for d in self.runtime_defenses):
                 load_kwargs["attn_implementation"] = "eager"
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path,
@@ -279,127 +287,148 @@ class GradingDefensePipeline:
                             attn_meta["clean"] = attention_summary_to_dict(s)
                     original_resp = self._generate(messages)
 
-                    # GT=correct: skip attack + defense-attack (ASR/eval only targets incorrect GT)
+                    # ── Step 2: 攻击推理 ──
                     end_tag = "</student_answer>"
+
+                    # GT=correct: skip attack + defense-attack (ASR/eval only targets incorrect GT)
                     skip_attack_eval = self._gt_is_correct(data)
                     attacked_messages = [{"role": "user", "content": prompt}]
                     attack_suffix = ""
                     bank_meta = None
                     attacked_resp = original_resp
+                    defended_attacked_resp = None
 
-                    if skip_attack_eval:
-                        print(
-                            f"[pipeline] Skipping attack/defense-attack for sample {source_index}: "
-                            f"GT=correct",
-                            flush=True,
-                        )
-                    else:
-                        # ── Step 2: 攻击推理 ──
+                    # GCG nanogcg import and reserved-token patch (once per run)
+                    _gcg_patched = False
+                    if config.attack_method.lower() == "gcg":
+                        import time as _gcg_time
+                        import nanogcg
+                        import nanogcg.utils as _ncg_utils
+                        _orig_get_nonascii_toks = _ncg_utils.get_nonascii_toks
+                        def _patched_get_nonascii_toks(tokenizer, device="cpu"):
+                            not_allowed = _orig_get_nonascii_toks(tokenizer, device)
+                            reserved_ids = [
+                                tid for tok, tid in tokenizer.get_vocab().items()
+                                if tok.startswith("<|reserved_special_token_")
+                            ]
+                            if reserved_ids:
+                                not_allowed = torch.cat([
+                                    not_allowed,
+                                    torch.tensor(reserved_ids, device=device),
+                                ])
+                            return not_allowed
+                        _ncg_utils.get_nonascii_toks = _patched_get_nonascii_toks
+                        _gcg_patched = True
+
+                    def _run_attack(p: str, orig_resp):
+                        """Run attack computation against prompt p.
+                        Returns (attacked_resp, attack_suffix, attacked_messages, bank_meta)."""
+                        msgs = [{"role": "user", "content": p}]
+                        suffix = ""
+                        bm = None
+                        resp = orig_resp  # default for suffix bank (no flip → original)
+
                         if config.attack_method.lower() == "gcg":
-                            import time
-                            import nanogcg
                             target = config.params["target"]
                             gcg_config = nanogcg.GCGConfig(**config.params["gcg_config"])
-
-                            # 过滤 Llama reserved_special_token（默认过滤不覆盖这类 token）
-                            import nanogcg.utils as _ncg_utils
-                            _orig_get_nonascii_toks = _ncg_utils.get_nonascii_toks
-                            def _patched_get_nonascii_toks(tokenizer, device="cpu"):
-                                not_allowed = _orig_get_nonascii_toks(tokenizer, device)
-                                reserved_ids = [
-                                    tid for tok, tid in tokenizer.get_vocab().items()
-                                    if tok.startswith("<|reserved_special_token_")
-                                ]
-                                if reserved_ids:
-                                    not_allowed = torch.cat([
-                                        not_allowed,
-                                        torch.tensor(reserved_ids, device=device),
-                                    ])
-                                return not_allowed
-                            _ncg_utils.get_nonascii_toks = _patched_get_nonascii_toks
                             # Blind prompt for GCG optimization (no solution)
-                            blind_prompt = config.grading_template.format(
+                            blind_p = config.grading_template.format(
                                 question=data.question,
                                 solution="",
                                 student_answer=data.student_answer,
                             )
-                            blind_insert_pos = blind_prompt.rfind(end_tag)
+                            # Apply structural pre-processing to blind prompt too
+                            for d in self.structural_defenses:
+                                blind_p = d.pre_process(blind_p)
+                            blind_insert_pos = blind_p.rfind(end_tag)
                             if blind_insert_pos != -1:
-                                blind_gcq_prompt = blind_prompt[:blind_insert_pos]
-                                t_start = time.perf_counter()
+                                blind_gcq_p = blind_p[:blind_insert_pos]
+                                t_start = _gcg_time.perf_counter()
                                 gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                         [{"role": "user", "content": blind_gcq_prompt}],
+                                                         [{"role": "user", "content": blind_gcq_p}],
                                                          target, gcg_config)
-                                t_end = time.perf_counter()
-                                attack_suffix = gcg_result.best_string
-                                full_insert_pos = prompt.rfind(end_tag)
-                                attacked_messages[0]["content"] = prompt[:full_insert_pos] + attack_suffix + end_tag
+                                t_end = _gcg_time.perf_counter()
+                                suffix = gcg_result.best_string
+                                full_insert_pos = p.rfind(end_tag)
+                                msgs[0]["content"] = p[:full_insert_pos] + suffix + end_tag
                             else:
-                                t_start = time.perf_counter()
+                                t_start = _gcg_time.perf_counter()
                                 gcg_result = nanogcg.run(self.model, self.tokenizer,
-                                                         [{"role": "user", "content": blind_prompt}],
+                                                         [{"role": "user", "content": blind_p}],
                                                          target, gcg_config)
-                                t_end = time.perf_counter()
-                                attack_suffix = gcg_result.best_string
-                                attacked_messages[0]["content"] = prompt + attack_suffix
+                                t_end = _gcg_time.perf_counter()
+                                suffix = gcg_result.best_string
+                                msgs[0]["content"] = p + suffix
                             print(f"[GCG] Optimization done in {t_end - t_start:.1f}s", flush=True)
+
                         elif config.attack_method.lower() == "roleplay":
-                            attack_suffix = config.params["adv_prompt"]
-                            insert_pos = prompt.rfind(end_tag)
+                            suffix = config.params["adv_prompt"]
+                            insert_pos = p.rfind(end_tag)
                             if insert_pos != -1:
-                                attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
+                                msgs[0]["content"] = p[:insert_pos] + suffix + end_tag
                             else:
-                                attacked_messages[0]["content"] = prompt + attack_suffix
+                                msgs[0]["content"] = p + suffix
+
                         elif config.attack_method.lower() == "injection":
-                            attack_suffix = config.params["injection_prompt"]
-                            insert_pos = prompt.rfind(end_tag)
+                            suffix = config.params["injection_prompt"]
+                            insert_pos = p.rfind(end_tag)
                             if insert_pos != -1:
-                                attacked_messages[0]["content"] = prompt[:insert_pos] + attack_suffix + end_tag
+                                msgs[0]["content"] = p[:insert_pos] + suffix + end_tag
                             else:
-                                attacked_messages[0]["content"] = prompt + attack_suffix
+                                msgs[0]["content"] = p + suffix
+
                         elif config.attack_method.lower() == "gcg_suffix_bank":
                             import time as _sbtime
                             from eval.metrics import _parse_grade
 
+                            # Blind prompt for suffix bank search (no solution)
+                            blind_p = config.grading_template.format(
+                                question=data.question,
+                                solution="",
+                                student_answer=data.student_answer,
+                            )
+                            for d in self.structural_defenses:
+                                blind_p = d.pre_process(blind_p)
+
                             t_start = _sbtime.perf_counter()
-                            # Defaults: no suffix succeeds
-                            attacked_resp = original_resp
-                            attack_suffix = ""
                             success_suffix_index = None
                             success_suffix = None
                             promotion_suffix_index = None
                             promotion_suffix = None
                             suffixes_tried = 0
-                            insert_pos_sb = prompt.rfind(end_tag)
-                            original_grade_for_bank = _parse_grade(original_resp, config.nclass)
+                            insert_pos_sb = blind_p.rfind(end_tag)
+                            original_grade_for_bank = _parse_grade(orig_resp, config.nclass)
 
-                            for suffix_idx, suffix in enumerate(bank):
+                            for s_idx, s in enumerate(bank):
                                 suffixes_tried += 1
                                 if insert_pos_sb != -1:
-                                    test_content = prompt[:insert_pos_sb] + suffix + end_tag
+                                    test_content = blind_p[:insert_pos_sb] + s + end_tag
                                 else:
-                                    test_content = prompt + suffix
+                                    test_content = blind_p + s
 
                                 test_resp = self._generate(
                                     [{"role": "user", "content": test_content}]
                                 )
                                 test_grade = _parse_grade(test_resp, config.nclass)
 
-                                # Track first promotion (any grade improvement)
                                 if (original_grade_for_bank is not None
                                         and test_grade is not None
                                         and test_grade < original_grade_for_bank
                                         and promotion_suffix_index is None):
-                                    promotion_suffix_index = suffix_idx
-                                    promotion_suffix = suffix
+                                    promotion_suffix_index = s_idx
+                                    promotion_suffix = s
 
-                                # Early stop on correct flip
                                 if test_grade == 0:  # 0 = correct
-                                    attacked_resp = test_resp
-                                    attack_suffix = suffix
-                                    success_suffix_index = suffix_idx
-                                    success_suffix = suffix
-                                    attacked_messages[0]["content"] = test_content
+                                    resp = test_resp
+                                    suffix = s
+                                    success_suffix_index = s_idx
+                                    success_suffix = s
+                                    # Build final attacked message from full prompt
+                                    full_insert_pos = p.rfind(end_tag)
+                                    if full_insert_pos != -1:
+                                        msgs[0]["content"] = p[:full_insert_pos] + s + end_tag
+                                    else:
+                                        msgs[0]["content"] = p + s
                                     break
 
                             t_end = _sbtime.perf_counter()
@@ -411,7 +440,7 @@ class GradingDefensePipeline:
                                 flush=True,
                             )
 
-                            bank_meta = {
+                            bm = {
                                 "success_suffix_index": success_suffix_index,
                                 "success_suffix": success_suffix,
                                 "promotion_suffix_index": promotion_suffix_index,
@@ -420,6 +449,22 @@ class GradingDefensePipeline:
                                 "bank_path": config.params.get("bank_path"),
                                 "bank_size": len(bank),
                             }
+
+                        if config.attack_method.lower() != "gcg_suffix_bank":
+                            resp = self._generate(msgs)
+
+                        return resp, suffix, msgs, bm
+
+                    if skip_attack_eval:
+                        print(
+                            f"[pipeline] Skipping attack/defense-attack for sample {source_index}: "
+                            f"GT=correct",
+                            flush=True,
+                        )
+                    else:
+                        # ── Step 2a: Attack on CLEAN prompt (baseline ASR) ──
+                        attacked_resp, attack_suffix, attacked_messages, bank_meta = \
+                            _run_attack(prompt, original_resp)
 
                         if self._should_log_attention():
                             s = self._analyze_attention(
@@ -433,13 +478,19 @@ class GradingDefensePipeline:
                                 attacked_attn_summaries.append(s)
                                 from utils.attention_utils import attention_summary_to_dict
                                 attn_meta["attacked"] = attention_summary_to_dict(s)
-                        # gcg_suffix_bank generates inside its branch (multi-suffix iteration)
-                        if config.attack_method.lower() != "gcg_suffix_bank":
-                            attacked_resp = self._generate(attacked_messages)
+
+                        # ── Step 2b: Structural pre-processing (white-box defense) ──
+                        if self.structural_defenses:
+                            defended_prompt = prompt
+                            for d in self.structural_defenses:
+                                defended_prompt = d.pre_process(defended_prompt)
+
+                            # ── Step 2c: Attack on DEFENDED prompt ──
+                            defended_attacked_resp, _, _, _ = \
+                                _run_attack(defended_prompt, original_resp)
 
                     # ── Step 3: 防御推理 ──
                     defended_original_resp = None
-                    defended_attacked_resp = None
                     rejected = False
 
                     if self.defenses:
@@ -471,7 +522,7 @@ class GradingDefensePipeline:
                                             )
                                     finally:
                                         self._remove_defense_hooks(hook_removers)
-                                for d in self.defenses:
+                                for d in self.runtime_defenses:
                                     defended_original_resp = d.post_process(
                                         defended_original_resp or ""
                                     )
@@ -480,39 +531,46 @@ class GradingDefensePipeline:
                                             defended_attacked_resp or ""
                                         )
                             else:
-                                defended_prompt = prompt
-                                for d in self.defenses:
+                                # Start from defended_prompt if structural defenses ran
+                                # in Step 2b; otherwise build from clean prompt.
+                                if not self.structural_defenses:
+                                    defended_prompt = prompt
+                                # Apply runtime pre-processing defenses on top.
+                                for d in self.runtime_defenses:
                                     defended_prompt = d.pre_process(defended_prompt)
 
-                                if config.attack_method.lower() in ("gcg", "gcg_suffix_bank"):
-                                    defended_insert_pos = defended_prompt.rfind(end_tag)
-                                    if defended_insert_pos != -1:
-                                        defended_attacked_content = (
-                                            defended_prompt[:defended_insert_pos]
-                                            + attack_suffix + end_tag
-                                        )
+                                # Rebuild attacked content and regenerate only if
+                                # NOT already computed against defended prompt in Step 2b.
+                                if not self.structural_defenses:
+                                    if config.attack_method.lower() in ("gcg", "gcg_suffix_bank"):
+                                        defended_insert_pos = defended_prompt.rfind(end_tag)
+                                        if defended_insert_pos != -1:
+                                            defended_attacked_content = (
+                                                defended_prompt[:defended_insert_pos]
+                                                + attack_suffix + end_tag
+                                            )
+                                        else:
+                                            defended_attacked_content = defended_prompt + attack_suffix
+                                    elif config.attack_method.lower() == "roleplay":
+                                        rp_insert = defended_prompt.rfind(end_tag)
+                                        if rp_insert != -1:
+                                            defended_attacked_content = (
+                                                defended_prompt[:rp_insert]
+                                                + attack_suffix + end_tag
+                                            )
+                                        else:
+                                            defended_attacked_content = defended_prompt + attack_suffix
+                                    elif config.attack_method.lower() == "injection":
+                                        rp_insert = defended_prompt.rfind(end_tag)
+                                        if rp_insert != -1:
+                                            defended_attacked_content = (
+                                                defended_prompt[:rp_insert]
+                                                + attack_suffix + end_tag
+                                            )
+                                        else:
+                                            defended_attacked_content = defended_prompt + attack_suffix
                                     else:
                                         defended_attacked_content = defended_prompt + attack_suffix
-                                elif config.attack_method.lower() == "roleplay":
-                                    rp_insert = defended_prompt.rfind(end_tag)
-                                    if rp_insert != -1:
-                                        defended_attacked_content = (
-                                            defended_prompt[:rp_insert]
-                                            + attack_suffix + end_tag
-                                        )
-                                    else:
-                                        defended_attacked_content = defended_prompt + attack_suffix
-                                elif config.attack_method.lower() == "injection":
-                                    rp_insert = defended_prompt.rfind(end_tag)
-                                    if rp_insert != -1:
-                                        defended_attacked_content = (
-                                            defended_prompt[:rp_insert]
-                                            + attack_suffix + end_tag
-                                        )
-                                    else:
-                                        defended_attacked_content = defended_prompt + attack_suffix
-                                else:
-                                    defended_attacked_content = defended_prompt + attack_suffix
 
                                 if self.context_aware_defenses:
                                     defended_original_resp = self._generate_with_defense_hooks(
@@ -520,7 +578,7 @@ class GradingDefensePipeline:
                                         defended_prompt,
                                         "",
                                     )
-                                    if not skip_attack_eval:
+                                    if not skip_attack_eval and not self.structural_defenses:
                                         defended_attacked_resp = self._generate_with_defense_hooks(
                                             [{"role": "user", "content": defended_attacked_content}],
                                             defended_attacked_content,
@@ -534,14 +592,14 @@ class GradingDefensePipeline:
                                         defended_original_resp = self._generate(
                                             [{"role": "user", "content": defended_prompt}]
                                         )
-                                        if not skip_attack_eval:
+                                        if not skip_attack_eval and not self.structural_defenses:
                                             defended_attacked_resp = self._generate(
                                                 [{"role": "user", "content": defended_attacked_content}]
                                             )
                                     finally:
                                         self._remove_defense_hooks(hook_removers)
 
-                                for d in self.defenses:
+                                for d in self.runtime_defenses:
                                     defended_original_resp = d.post_process(
                                         defended_original_resp or ""
                                     )
