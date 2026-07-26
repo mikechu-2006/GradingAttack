@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Results - GradingAttack</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand-block" href="./index.html">
+        <span class="eyebrow">GradingAttack</span>
+        <span class="brand-title">实验结果</span>
+      </a>
+      <nav class="nav">
+        <a href="./index.html">首页</a>
+        <a href="./attacks.html">攻击</a>
+        <a href="./defenses.html">防御</a>
+        <a class="active" href="./metrics.html">结果</a>
+        <a href="./data.html">数据说明</a>
+        <a href="./code.html">代码</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <div class="wrap narrow">
+        <p class="kicker">Main branch snapshot</p>
+        <h1>main 分支公开的是配置和数据集，不是实验结果日志</h1>
+        <p class="lead">
+          因此这个页面只列出 main 分支中可以直接复现的公开输入，而不展示未提交到 main 的实验数字。
+        </p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap result-layout">
+        <article class="chart-card">
+          <h2>Datasets in main</h2>
+          <div class="bars">
+            <div class="bar-row">
+              <div class="bar-label"><strong>scientsbank</strong><span>5000 rows</span></div>
+              <div class="bar-track"><div class="bar-seg c-green" style="width:100%"></div></div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label"><strong>gaokao-2023</strong><span>jsonl</span></div>
+              <div class="bar-track"><div class="bar-seg c-slate" style="width:70%"></div></div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label"><strong>gsm8k / math / math23k</strong><span>jsonl</span></div>
+              <div class="bar-track"><div class="bar-seg c-slate" style="width:70%"></div></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="chart-card">
+          <h2>Main configs</h2>
+          <div class="matrix-grid">
+            <div class="matrix-cell matrix-headcell">Config</div>
+            <div class="matrix-cell matrix-headcell">Method</div>
+            <div class="matrix-cell matrix-headcell">Model</div>
+            <div class="matrix-cell matrix-headcell">Data</div>
+            <div class="matrix-cell matrix-rowhead">GCG</div>
+            <div class="matrix-cell">GCG</div>
+            <div class="matrix-cell">Llama-3.1</div>
+            <div class="matrix-cell">5 datasets</div>
+            <div class="matrix-cell matrix-rowhead">RolePlay</div>
+            <div class="matrix-cell">RolePlay</div>
+            <div class="matrix-cell">Llama-3.1</div>
+            <div class="matrix-cell">5 datasets</div>
+            <div class="matrix-cell matrix-rowhead">Defense</div>
+            <div class="matrix-cell">GCG + defenses</div>
+            <div class="matrix-cell">Llama-3.1</div>
+            <div class="matrix-cell">scientsbank</div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="band alt">
+      <div class="wrap cards-3">
+        <a class="link-card" href="./data.html">
+          <span class="metric-tag">Notes</span>
+          <h2>数据口径</h2>
+          <p>main 分支没有提交 result/logs，因此页面只展示公开配置与输入数据。</p>
+        </a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attacks - GradingAttack</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand-block" href="./index.html">
+        <span class="eyebrow">GradingAttack</span>
+        <span class="brand-title">攻击方法</span>
+      </a>
+      <nav class="nav">
+        <a href="./index.html">首页</a>
+        <a class="active" href="./attacks.html">攻击</a>
+        <a href="./defenses.html">防御</a>
+        <a href="./metrics.html">结果</a>
+        <a href="./data.html">数据说明</a>
+        <a href="./code.html">代码</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <div class="wrap narrow">
+        <p class="kicker">White-box suffix attack</p>
+        <h1>main 分支包含 GCG 和 RolePlay 两类攻击</h1>
+        <p class="lead">
+          这里不再使用之前实验分支的数据，只展示 main 分支 `configs/` 中公开的攻击配置。
+        </p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap cards-4">
+        <article class="info-card">
+          <h2>GCG</h2>
+          <p>目标字符串是 `&lt;answer&gt;correct&lt;/answer&gt;`，优化步数为 100。</p>
+        </article>
+        <article class="info-card">
+          <h2>GCG search</h2>
+          <p>`search_width: 64`，`topk: 64`，`use_prefix_cache: true`。</p>
+        </article>
+        <article class="info-card">
+          <h2>RolePlay</h2>
+          <p>main 分支直接保存了 prompt-level adversarial instruction。</p>
+        </article>
+        <article class="info-card">
+          <h2>Model</h2>
+          <p>默认配置模型为 `meta-llama/Llama-3.1-8B-Instruct`。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -4,6 +4,13 @@ LLM-based ASAG (Automatic Short Answer Grading) adversarial attack and defense e
 
 This project studies whether prompt-level attacks can manipulate LLM grading behavior, and whether lightweight defenses can reduce that effect while preserving normal grading quality.
 
+## Interactive Showcase
+
+A static version of the project showcase from the fork's GitHub Pages branches now lives in `docs/showcase/`.
+
+- Open [docs/showcase/index.html](docs/showcase/index.html) locally to browse the interactive pages.
+- The showcase assets are self-contained and mirror the former `gh-pages` / `public-showcase` content inside the main repository.
+
 ## Current Focus
 
 The current experiments focus on:
