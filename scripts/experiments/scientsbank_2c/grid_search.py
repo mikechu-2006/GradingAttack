@@ -45,8 +45,35 @@ DEFAULT_SUFFIX_BANK_PATH = (
 
 
 def resolve_suffix_bank_path() -> str:
-    """Env override; treat empty string as unset."""
-    return os.environ.get("SUFFIX_BANK_PATH") or DEFAULT_SUFFIX_BANK_PATH
+    """Env override; treat empty string as unset. Returns repo-relative path."""
+    raw = os.environ.get("SUFFIX_BANK_PATH") or DEFAULT_SUFFIX_BANK_PATH
+    path = Path(raw)
+    if path.is_absolute():
+        try:
+            return str(path.relative_to(REPO_ROOT))
+        except ValueError:
+            return str(path)
+    return raw.replace("\\", "/")
+
+
+def ensure_suffix_bank() -> Path:
+    """Validate suffix bank exists before running gcg_* pipelines."""
+    rel = resolve_suffix_bank_path()
+    path = REPO_ROOT / rel
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"[sb2c] suffix bank not found: {path}\n"
+            f"  Expected at: {rel}\n"
+            f"  Set SUFFIX_BANK_PATH or place bank under result_from_hpc_gcg_suffix_bank/"
+        )
+    line_count = sum(1 for line in path.open(encoding="utf-8") if line.strip())
+    if line_count == 0:
+        raise RuntimeError(f"[sb2c] suffix bank is empty: {path}")
+    print(
+        f"[sb2c] suffix bank OK: {rel} ({line_count} entries)",
+        flush=True,
+    )
+    return path
 
 
 GCG_SUFFIX_BANK_PARAMS: Dict[str, Any] = {
@@ -555,11 +582,17 @@ def run_pipeline_flow(
     rebuild_summary: bool = False,
     allow_partial_tune: bool = False,
 ) -> None:
+    if spec.attack_method == "gcg_suffix_bank" and phase in ("tune", "full", "all"):
+        ensure_suffix_bank()
+
     summary: Dict[str, Any] | None = None
     if rebuild_summary and phase in ("full", "all"):
         summary = rebuild_tune_summary(spec)
     elif phase in ("tune", "all"):
         summary = run_tune(spec, resume=resume, force_rerun=force_rerun)
+        if phase == "all":
+            # 合并磁盘上已有 tune metrics（含旧版网格），再选最优跑 full
+            summary = rebuild_tune_summary(spec)
     elif phase == "full":
         path = summary_path or (spec.summary_dir / "summary.json")
         if not path.is_file():
@@ -621,6 +654,8 @@ def main() -> None:
     keys = list(PIPELINES.keys()) if args.pipeline == "all" else [args.pipeline]
     resume = not args.no_resume and not args.force_rerun
     allow_partial = args.allow_partial_tune or os.environ.get("ALLOW_PARTIAL_TUNE", "") == "1"
+    if any(PIPELINES[k].attack_method == "gcg_suffix_bank" for k in keys):
+        ensure_suffix_bank()
     print(
         f"[sb2c] pipelines={keys} phase={args.phase} resume={resume} "
         f"rebuild_summary={args.rebuild_summary} allow_partial_tune={allow_partial}",

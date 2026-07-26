@@ -1044,8 +1044,15 @@ class GradingDefensePipeline:
         from pathlib import Path
 
         path = Path(self.config.params["bank_path"])
+        if not path.is_absolute() and not path.exists():
+            cwd_candidate = Path.cwd() / path
+            if cwd_candidate.exists():
+                path = cwd_candidate
         if not path.exists():
-            raise FileNotFoundError(f"Suffix bank not found: {path}")
+            raise FileNotFoundError(
+                f"Suffix bank not found: {self.config.params['bank_path']} "
+                f"(resolved: {path}). Run from repo root or use an absolute bank_path."
+            )
 
         suffixes: list[str] = []
         if path.suffix == ".jsonl":
@@ -1094,6 +1101,10 @@ class GradingDefensePipeline:
         from pathlib import Path
 
         path = Path(self.config.params["bank_path"])
+        if not path.is_absolute() and not path.exists():
+            cwd_candidate = Path.cwd() / path
+            if cwd_candidate.exists():
+                path = cwd_candidate
         indices: set[int] = set()
         if not path.exists() or path.suffix not in {".json", ".jsonl"}:
             self._bank_source_indices_cache = indices
