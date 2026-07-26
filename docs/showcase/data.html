@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Notes - GradingAttack</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand-block" href="./index.html">
+        <span class="eyebrow">GradingAttack</span>
+        <span class="brand-title">数据说明</span>
+      </a>
+      <nav class="nav">
+        <a href="./index.html">首页</a>
+        <a href="./attacks.html">攻击</a>
+        <a href="./defenses.html">防御</a>
+        <a href="./metrics.html">结果</a>
+        <a class="active" href="./data.html">数据说明</a>
+        <a href="./code.html">代码</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <div class="wrap narrow">
+        <p class="kicker">Main branch data notes</p>
+        <h1>这里说明 main 分支数据来源</h1>
+        <p class="lead">
+          展示页现在只使用 `main` 分支公开文件。main 中没有提交实验 logs/result，
+          所以不再展示之前的总体准确率或 ASR 数字。
+        </p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap cards-3">
+        <article class="info-card">
+          <h2>README</h2>
+          <p>main README 将项目描述为 LLM-based ASAG 的 unified adversarial evaluation framework。</p>
+        </article>
+        <article class="info-card">
+          <h2>Datasets</h2>
+          <p>main 公开了 `gaokao-2023`、`gsm8k`、`math`、`math23k` 和 `scientsbank`。</p>
+        </article>
+        <article class="info-card">
+          <h2>SciEntsBank</h2>
+          <p>`dataset/scientsbank.jsonl` 在 main 中共有 5000 行，首页 demo 样本来自其中一条 incorrect 记录。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="band alt">
+      <div class="wrap cards-3">
+        <article class="info-card">
+          <h2>GCG config</h2>
+          <p>目标是 `&lt;answer&gt;correct&lt;/answer&gt;`，`num_steps: 100`，`search_width: 64`，`topk: 64`。</p>
+        </article>
+        <article class="info-card">
+          <h2>RolePlay config</h2>
+          <p>main 中直接保存了一段 role-playing adversarial prompt，用于 prompt-level attack。</p>
+        </article>
+        <article class="info-card">
+          <h2>Result scope</h2>
+          <p>main 没有包含 logs/result 文件，页面不会声称 main 分支中不存在的评估结果。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

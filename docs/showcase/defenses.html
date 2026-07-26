@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Defenses - GradingAttack</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand-block" href="./index.html">
+        <span class="eyebrow">GradingAttack</span>
+        <span class="brand-title">防御方法</span>
+      </a>
+      <nav class="nav">
+        <a href="./index.html">首页</a>
+        <a href="./attacks.html">攻击</a>
+        <a class="active" href="./defenses.html">防御</a>
+        <a href="./metrics.html">结果</a>
+        <a href="./data.html">数据说明</a>
+        <a href="./code.html">代码</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <div class="wrap narrow">
+        <p class="kicker">Prompt hardening, filtering, voting, rewriting</p>
+        <h1>main 分支公开了 Self Reminder 和 PPL Filter 配置</h1>
+        <p class="lead">
+          防御页面现在只展示 main 分支已有配置，不再引用之前实验分支里的额外防御结果。
+        </p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap cards-4">
+        <article class="info-card">
+          <h2>Self Reminder</h2>
+          <p>提醒模型忽略 student_answer 后面的覆盖评分指令，并遵循原始评分标准。</p>
+        </article>
+        <article class="info-card">
+          <h2>Perplexity Filter</h2>
+          <p>main 配置中阈值为 `1000.0`，用于筛查异常文本。</p>
+        </article>
+        <article class="info-card">
+          <h2>Defense log path</h2>
+          <p>`log_dir: ./logs_defense`，`result_dir: ./result_defense`。</p>
+        </article>
+        <article class="info-card">
+          <h2>Pipeline mode</h2>
+          <p>`GCG-Llama-3.1-8B-Instruct-defense.yaml` 中启用了 `pipeline_mode: true`。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
