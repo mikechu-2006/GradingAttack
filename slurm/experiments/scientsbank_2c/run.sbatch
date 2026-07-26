@@ -11,6 +11,8 @@
 # 示例:
 #   PIPELINE=gcg_hs sbatch slurm/experiments/scientsbank_2c/run.sbatch
 #   PIPELINE=all PHASE=tune sbatch slurm/experiments/scientsbank_2c/run.sbatch
+# GCG 管线 tune 较慢；若 tune 中断导致没有 full，可从已有 metrics 重建 summary 后直接跑 full:
+#   PIPELINE=gcg_hs PHASE=full REBUILD_SUMMARY=1 ALLOW_PARTIAL_TUNE=1 sbatch slurm/experiments/scientsbank_2c/run.sbatch
 
 mkdir -p logs/slurm
 bash scripts/experiments/scientsbank_2c/run.sh

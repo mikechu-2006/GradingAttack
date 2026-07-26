@@ -60,6 +60,16 @@ LAYER_GRID: List[Tuple[str, Union[str, List[int]]]] = [
     ("L24-31", [24, 25, 26, 27, 28, 29, 30, 31]),
 ]
 
+# 旧版 tune 网格（HPC 上可能已有这些组合的 metrics）
+LEGACY_LAYER_GRID: List[Tuple[str, Union[str, List[int]]]] = [
+    ("all", "all"),
+    ("L16-31", list(range(16, 32))),
+]
+
+LAYER_LOOKUP: Dict[str, Union[str, List[int]]] = {
+    label: layers for label, layers in (LAYER_GRID + LEGACY_LAYER_GRID)
+}
+
 
 @dataclass(frozen=True)
 class PipelineSpec:
@@ -171,6 +181,7 @@ def _shared_base(spec: PipelineSpec, max_samples: int, log_attention: bool) -> D
     }
     if spec.attack_method == "gcg_suffix_bank":
         cfg["params"] = copy.deepcopy(GCG_SUFFIX_BANK_PARAMS)
+        cfg["params"]["bank_path"] = resolve_suffix_bank_path()
     elif spec.attack_method == "RolePlay":
         cfg["params"] = {"adv_prompt": ROLEPLAY_ADV}
     return cfg
@@ -226,13 +237,16 @@ def run_pipeline(config_path: Path) -> None:
     subprocess.run(cmd, cwd=REPO_ROOT, check=True)
 
 
-def find_metrics_path(config_name_str: str, pipeline_key: str) -> Path:
-    search_dirs = [
+def metrics_search_dirs(pipeline_key: str) -> List[Path]:
+    return [
         REPO_ROOT / "result" / "experiments" / "scientsbank_2c" / pipeline_key,
         REPO_ROOT / "result" / "RolePlay" / "Llama-3.1-8B-Instruct",
         REPO_ROOT / "result" / "GCG" / "Llama-3.1-8B-Instruct",
     ]
-    for result_dir in search_dirs:
+
+
+def try_find_metrics_path(config_name_str: str, pipeline_key: str) -> Path | None:
+    for result_dir in metrics_search_dirs(pipeline_key):
         if not result_dir.is_dir():
             continue
         candidates = sorted(
@@ -242,9 +256,17 @@ def find_metrics_path(config_name_str: str, pipeline_key: str) -> Path:
         )
         if candidates:
             return candidates[0]
-    raise FileNotFoundError(
-        f"No metrics for {config_name_str} under {[str(d) for d in search_dirs]}"
-    )
+    return None
+
+
+def find_metrics_path(config_name_str: str, pipeline_key: str) -> Path:
+    path = try_find_metrics_path(config_name_str, pipeline_key)
+    if path is None:
+        raise FileNotFoundError(
+            f"No metrics for {config_name_str} under "
+            f"{[str(d) for d in metrics_search_dirs(pipeline_key)]}"
+        )
+    return path
 
 
 def load_metrics(path: Path) -> Dict[str, Any]:
@@ -273,53 +295,78 @@ def grid_combinations(spec: PipelineSpec) -> List[Tuple[float, str, Union[str, L
     ]
 
 
-def run_tune(spec: PipelineSpec) -> Dict[str, Any]:
-    rows: List[Dict[str, Any]] = []
-    combos = grid_combinations(spec)
-    print(
-        f"[sb2c] [{spec.key}] tune: {len(combos)} combos × {spec.tune_samples} samples",
-        flush=True,
-    )
-    for idx, (param_value, layer_label, layers) in enumerate(combos, start=1):
-        name = config_name(spec, "tune", param_value, layer_label)
-        print(
-            f"[sb2c] tune {idx}/{len(combos)}: {spec.param_name}={param_value} layers={layer_label}",
-            flush=True,
-        )
-        cfg = build_config(
-            spec, "tune", param_value, layer_label, layers,
-            spec.tune_samples, log_attention=False,
-        )
-        cfg_path = write_config(cfg, spec.config_dir)
-        run_pipeline(cfg_path)
-        metrics_path = find_metrics_path(name, spec.key)
-        metrics = load_metrics(metrics_path)
-        row = {
-            "phase": "tune",
-            "pipeline": spec.key,
-            "name": name,
-            spec.param_name: param_value,
-            "layers_label": layer_label,
-            "layers": layers,
-            "max_samples": spec.tune_samples,
-            "metrics_path": str(metrics_path.relative_to(REPO_ROOT)),
-            "asr": metrics["asr"],
-            "asr_defended": metrics["asr_defended"],
-            "qwk_clean": metrics["qwk_clean"],
-            "qwk_attack": metrics["qwk_attack"],
-            "qwk_defense_clean": metrics["qwk_defense_clean"],
-            "qwk_defense_attack": metrics["qwk_defense_attack"],
-            "qwk_clean_reduction": qwk_clean_reduction(metrics),
-            "asr_reduction": float(metrics["asr"]) - float(metrics["asr_defended"]),
-            "score": score_metrics(metrics),
-        }
-        rows.append(row)
-        print(
-            f"[sb2c]   ASR={row['asr']:.4f} ASR_def={row['asr_defended']:.4f} "
-            f"QWK_clean_red={row['qwk_clean_reduction']:.4f} score={row['score']:.4f}",
-            flush=True,
-        )
+def _decode_param_token(spec: PipelineSpec, token: str) -> float:
+    if spec.param_name == "temperature":
+        body = token[1:]
+        if len(body) < 2:
+            raise ValueError(f"invalid temperature token: {token}")
+        return float(f"{body[:-1]}.{body[-1]}")
+    if token.startswith("B"):
+        body = token[1:]
+        if len(body) < 3:
+            raise ValueError(f"invalid beta token: {token}")
+        return float(f"{body[:-2]}.{body[-2:]}")
+    return float(token)
 
+
+def _parse_tune_config_name(spec: PipelineSpec, name: str) -> Tuple[float, str, Union[str, List[int]]] | None:
+    prefix = f"scientsbank-2c-{_attack_tag(spec)}-{spec.defense_short}-tune-"
+    if not name.startswith(prefix):
+        return None
+    rest = name[len(prefix):]
+    for layer_label in sorted(LAYER_LOOKUP.keys(), key=len, reverse=True):
+        suffix = f"-{layer_label}"
+        if rest.endswith(suffix):
+            token = rest[: -len(suffix)]
+            if not token:
+                continue
+            try:
+                param_value = _decode_param_token(spec, token)
+            except ValueError:
+                continue
+            return param_value, layer_label, LAYER_LOOKUP[layer_label]
+    return None
+
+
+def build_tune_row(
+    spec: PipelineSpec,
+    name: str,
+    param_value: float,
+    layer_label: str,
+    layers: Union[str, List[int]],
+    metrics_path: Path,
+    metrics: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "phase": "tune",
+        "pipeline": spec.key,
+        "name": name,
+        spec.param_name: param_value,
+        "layers_label": layer_label,
+        "layers": layers,
+        "max_samples": spec.tune_samples,
+        "metrics_path": str(metrics_path.relative_to(REPO_ROOT)),
+        "asr": metrics["asr"],
+        "asr_defended": metrics["asr_defended"],
+        "qwk_clean": metrics["qwk_clean"],
+        "qwk_attack": metrics["qwk_attack"],
+        "qwk_defense_clean": metrics["qwk_defense_clean"],
+        "qwk_defense_attack": metrics["qwk_defense_attack"],
+        "qwk_clean_reduction": qwk_clean_reduction(metrics),
+        "asr_reduction": float(metrics["asr"]) - float(metrics["asr_defended"]),
+        "score": score_metrics(metrics),
+    }
+
+
+def write_tune_summary(
+    spec: PipelineSpec,
+    rows: List[Dict[str, Any]],
+    *,
+    completed_all: bool,
+    expected_combos: int,
+) -> Dict[str, Any]:
+    if not rows:
+        raise RuntimeError(f"[sb2c] [{spec.key}] no tune metrics found; cannot build summary")
     best = pick_best(rows)
     summary = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -331,6 +378,9 @@ def run_tune(spec: PipelineSpec) -> Dict[str, Any]:
         "random_seed": RANDOM_SEED,
         "selection_note": "auto-best: min score = 0.8*ASR_defended + 0.2*|QWK_clean-QWK_def_clean|",
         "score_formula": "0.8 * asr_defended + 0.2 * |qwk_clean - qwk_defense_clean|",
+        "status": "complete" if completed_all else "partial",
+        "completed_combos": len(rows),
+        "expected_combos": expected_combos,
         "results": rows,
         "best": best,
     }
@@ -348,11 +398,112 @@ def run_tune(spec: PipelineSpec) -> Dict[str, Any]:
         for r in rows:
             writer.writerow({k: r.get(k) for k in csv_fields})
     print(
+        f"[sb2c] summary → {spec.summary_dir / 'summary.json'} "
+        f"({len(rows)}/{expected_combos} combos, status={summary['status']})",
+        flush=True,
+    )
+    print(
         f"[sb2c] best: {best[spec.param_name]}, layers={best['layers_label']}, "
         f"score={best['score']:.4f}",
         flush=True,
     )
     return summary
+
+
+def collect_tune_rows_from_disk(spec: PipelineSpec) -> List[Dict[str, Any]]:
+    rows_by_name: Dict[str, Dict[str, Any]] = {}
+    result_dir = REPO_ROOT / "result" / "experiments" / "scientsbank_2c" / spec.key
+    if not result_dir.is_dir():
+        return []
+    pattern = f"scientsbank-2c-{_attack_tag(spec)}-{spec.defense_short}-tune-*_metrics.json"
+    for metrics_path in sorted(result_dir.glob(pattern), key=lambda p: p.stat().st_mtime):
+        name = metrics_path.name.replace("_metrics.json", "").rsplit("_", 1)[0]
+        parsed = _parse_tune_config_name(spec, name)
+        if parsed is None:
+            continue
+        param_value, layer_label, layers = parsed
+        metrics = load_metrics(metrics_path)
+        row = build_tune_row(
+            spec, name, param_value, layer_label, layers, metrics_path, metrics
+        )
+        rows_by_name[name] = row
+    return list(rows_by_name.values())
+
+
+def run_tune(
+    spec: PipelineSpec,
+    *,
+    resume: bool = True,
+    force_rerun: bool = False,
+) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    combos = grid_combinations(spec)
+    print(
+        f"[sb2c] [{spec.key}] tune: {len(combos)} combos × {spec.tune_samples} samples "
+        f"(resume={resume}, force_rerun={force_rerun})",
+        flush=True,
+    )
+    for idx, (param_value, layer_label, layers) in enumerate(combos, start=1):
+        name = config_name(spec, "tune", param_value, layer_label)
+        metrics_path = None if force_rerun else try_find_metrics_path(name, spec.key)
+        if metrics_path is not None and resume:
+            metrics = load_metrics(metrics_path)
+            row = build_tune_row(
+                spec, name, param_value, layer_label, layers, metrics_path, metrics
+            )
+            rows.append(row)
+            print(
+                f"[sb2c] tune {idx}/{len(combos)}: skip existing {name} "
+                f"(score={row['score']:.4f})",
+                flush=True,
+            )
+            write_tune_summary(
+                spec, rows, completed_all=False, expected_combos=len(combos)
+            )
+            continue
+
+        print(
+            f"[sb2c] tune {idx}/{len(combos)}: {spec.param_name}={param_value} layers={layer_label}",
+            flush=True,
+        )
+        cfg = build_config(
+            spec, "tune", param_value, layer_label, layers,
+            spec.tune_samples, log_attention=False,
+        )
+        cfg_path = write_config(cfg, spec.config_dir)
+        run_pipeline(cfg_path)
+        metrics_path = find_metrics_path(name, spec.key)
+        metrics = load_metrics(metrics_path)
+        row = build_tune_row(
+            spec, name, param_value, layer_label, layers, metrics_path, metrics
+        )
+        rows.append(row)
+        print(
+            f"[sb2c]   ASR={row['asr']:.4f} ASR_def={row['asr_defended']:.4f} "
+            f"QWK_clean_red={row['qwk_clean_reduction']:.4f} score={row['score']:.4f}",
+            flush=True,
+        )
+        write_tune_summary(
+            spec, rows, completed_all=(idx == len(combos)), expected_combos=len(combos)
+        )
+
+    return write_tune_summary(
+        spec, rows, completed_all=True, expected_combos=len(combos)
+    )
+
+
+def rebuild_tune_summary(spec: PipelineSpec) -> Dict[str, Any]:
+    rows = collect_tune_rows_from_disk(spec)
+    expected = len(grid_combinations(spec))
+    completed_all = len(rows) >= expected
+    print(
+        f"[sb2c] [{spec.key}] rebuild summary from disk: "
+        f"{len(rows)} tune metrics found (expected {expected})",
+        flush=True,
+    )
+    return write_tune_summary(
+        spec, rows, completed_all=completed_all, expected_combos=expected
+    )
 
 
 def run_full(spec: PipelineSpec, best: Dict[str, Any]) -> Dict[str, Any]:
@@ -398,16 +549,39 @@ def run_pipeline_flow(
     spec: PipelineSpec,
     phase: str,
     summary_path: Path | None = None,
+    *,
+    resume: bool = True,
+    force_rerun: bool = False,
+    rebuild_summary: bool = False,
+    allow_partial_tune: bool = False,
 ) -> None:
-    if phase in ("tune", "all"):
-        summary = run_tune(spec)
-        best = summary["best"]
-    else:
+    summary: Dict[str, Any] | None = None
+    if rebuild_summary and phase in ("full", "all"):
+        summary = rebuild_tune_summary(spec)
+    elif phase in ("tune", "all"):
+        summary = run_tune(spec, resume=resume, force_rerun=force_rerun)
+    elif phase == "full":
         path = summary_path or (spec.summary_dir / "summary.json")
-        with open(path, encoding="utf-8") as f:
-            best = json.load(f)["best"]
+        if not path.is_file():
+            print(
+                f"[sb2c] [{spec.key}] summary missing at {path}; rebuilding from disk",
+                flush=True,
+            )
+            summary = rebuild_tune_summary(spec)
+        else:
+            with open(path, encoding="utf-8") as f:
+                summary = json.load(f)
+
     if phase in ("full", "all"):
-        run_full(spec, best)
+        if summary is None:
+            raise RuntimeError(f"[sb2c] [{spec.key}] no tune summary available for full phase")
+        if summary.get("status") == "partial" and not allow_partial_tune:
+            raise SystemExit(
+                f"[sb2c] [{spec.key}] tune incomplete "
+                f"({summary.get('completed_combos')}/{summary.get('expected_combos')} combos). "
+                "Re-submit tune, or run full with --allow-partial-tune / ALLOW_PARTIAL_TUNE=1."
+            )
+        run_full(spec, summary["best"])
 
 
 def parse_args() -> argparse.Namespace:
@@ -419,16 +593,50 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--phase", choices=["tune", "full", "all"], default="all")
     p.add_argument("--summary", type=Path, default=None)
+    p.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Re-run tune combos even when metrics already exist",
+    )
+    p.add_argument(
+        "--force-rerun",
+        action="store_true",
+        help="Ignore existing tune metrics and rerun every combo",
+    )
+    p.add_argument(
+        "--rebuild-summary",
+        action="store_true",
+        help="Rebuild tune summary.json from existing metrics before full",
+    )
+    p.add_argument(
+        "--allow-partial-tune",
+        action="store_true",
+        help="Allow full phase when tune grid did not fully complete",
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     keys = list(PIPELINES.keys()) if args.pipeline == "all" else [args.pipeline]
-    print(f"[sb2c] pipelines={keys} phase={args.phase}", flush=True)
+    resume = not args.no_resume and not args.force_rerun
+    allow_partial = args.allow_partial_tune or os.environ.get("ALLOW_PARTIAL_TUNE", "") == "1"
+    print(
+        f"[sb2c] pipelines={keys} phase={args.phase} resume={resume} "
+        f"rebuild_summary={args.rebuild_summary} allow_partial_tune={allow_partial}",
+        flush=True,
+    )
     for key in keys:
         print(f"\n{'=' * 60}\n[sb2c] {key}\n{'=' * 60}", flush=True)
-        run_pipeline_flow(PIPELINES[key], args.phase, args.summary)
+        run_pipeline_flow(
+            PIPELINES[key],
+            args.phase,
+            args.summary,
+            resume=resume,
+            force_rerun=args.force_rerun,
+            rebuild_summary=args.rebuild_summary,
+            allow_partial_tune=allow_partial,
+        )
 
 
 if __name__ == "__main__":
