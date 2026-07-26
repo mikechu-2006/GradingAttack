@@ -24,10 +24,19 @@ SB2C_ARGS=()
 if [ "${REBUILD_SUMMARY:-0}" = "1" ]; then
   SB2C_ARGS+=(--rebuild-summary)
 fi
-if [ "${ALLOW_PARTIAL_TUNE:-0}" = "1" ]; then
-  SB2C_ARGS+=(--allow-partial-tune)
-fi
 if [ "${FORCE_RERUN:-0}" = "1" ]; then
   SB2C_ARGS+=(--force-rerun)
+fi
+if [ "${DRY_RUN:-0}" = "1" ]; then
+  SB2C_ARGS+=(--dry-run)
+fi
+# GCG 管线：HPC 上 tune 常已完成，默认允许从已有 metrics 进入 full
+case "${PIPELINE}" in
+  gcg_hs|gcg_as)
+    ALLOW_PARTIAL_TUNE="${ALLOW_PARTIAL_TUNE:-1}"
+    ;;
+esac
+if [ "${ALLOW_PARTIAL_TUNE:-0}" = "1" ]; then
+  SB2C_ARGS+=(--allow-partial-tune)
 fi
 exec "${PYTHON}" "${SCRIPT_DIR}/grid_search.py" --pipeline "${PIPELINE}" --phase "${PHASE}" "${SB2C_ARGS[@]}"

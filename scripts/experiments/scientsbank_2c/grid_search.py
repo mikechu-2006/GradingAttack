@@ -258,10 +258,42 @@ def write_config(cfg: Dict[str, Any], out_dir: Path) -> Path:
     return path
 
 
-def run_pipeline(config_path: Path) -> None:
+def run_pipeline(config_path: Path, *, dry_run: bool = False) -> None:
     cmd = [sys.executable, "main.py", "--pipeline", str(config_path.relative_to(REPO_ROOT))]
     print(f"[sb2c] Running: {' '.join(cmd)}", flush=True)
+    if dry_run:
+        print("[sb2c] dry-run: skip subprocess", flush=True)
+        return
     subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+
+
+def grid_metrics_complete(spec: PipelineSpec) -> bool:
+    """当前 6 组 tune 网格是否都已有 primary metrics。"""
+    return all(
+        try_find_metrics_path(config_name(spec, "tune", param, layer_label), spec.key)
+        is not None
+        for param, layer_label, _ in grid_combinations(spec)
+    )
+
+
+def tune_ready_for_full(
+    spec: PipelineSpec,
+    summary: Dict[str, Any],
+    *,
+    allow_partial_tune: bool,
+) -> bool:
+    rows = summary.get("results") or []
+    if not rows:
+        return False
+    if grid_metrics_complete(spec):
+        return True
+    if allow_partial_tune:
+        return True
+    return summary.get("status") == "complete"
+
+
+def _is_primary_metrics_file(path: Path) -> bool:
+    return path.name.endswith("_metrics.json") and not path.name.endswith("_bank_metrics.json")
 
 
 def metrics_search_dirs(pipeline_key: str) -> List[Path]:
@@ -276,8 +308,12 @@ def try_find_metrics_path(config_name_str: str, pipeline_key: str) -> Path | Non
     for result_dir in metrics_search_dirs(pipeline_key):
         if not result_dir.is_dir():
             continue
+        candidates = [
+            p for p in result_dir.glob(f"{config_name_str}_*_metrics.json")
+            if _is_primary_metrics_file(p)
+        ]
         candidates = sorted(
-            result_dir.glob(f"{config_name_str}_*_metrics.json"),
+            candidates,
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
@@ -353,6 +389,28 @@ def _parse_tune_config_name(spec: PipelineSpec, name: str) -> Tuple[float, str, 
                 continue
             return param_value, layer_label, LAYER_LOOKUP[layer_label]
     return None
+
+
+REQUIRED_TUNE_METRIC_KEYS = (
+    "asr",
+    "asr_defended",
+    "qwk_clean",
+    "qwk_attack",
+    "qwk_defense_clean",
+    "qwk_defense_attack",
+)
+
+
+def load_primary_metrics(path: Path) -> Dict[str, Any]:
+    """Load pipeline *_metrics.json (not *_bank_metrics.json)."""
+    metrics = load_metrics(path)
+    missing = [k for k in REQUIRED_TUNE_METRIC_KEYS if k not in metrics]
+    if missing:
+        raise ValueError(
+            f"Invalid tune metrics at {path} (missing {missing}). "
+            "Expected primary *_metrics.json, not *_bank_metrics.json."
+        )
+    return metrics
 
 
 def build_tune_row(
@@ -444,12 +502,14 @@ def collect_tune_rows_from_disk(spec: PipelineSpec) -> List[Dict[str, Any]]:
         return []
     pattern = f"scientsbank-2c-{_attack_tag(spec)}-{spec.defense_short}-tune-*_metrics.json"
     for metrics_path in sorted(result_dir.glob(pattern), key=lambda p: p.stat().st_mtime):
+        if not _is_primary_metrics_file(metrics_path):
+            continue
         name = metrics_path.name.replace("_metrics.json", "").rsplit("_", 1)[0]
         parsed = _parse_tune_config_name(spec, name)
         if parsed is None:
             continue
         param_value, layer_label, layers = parsed
-        metrics = load_metrics(metrics_path)
+        metrics = load_primary_metrics(metrics_path)
         row = build_tune_row(
             spec, name, param_value, layer_label, layers, metrics_path, metrics
         )
@@ -462,6 +522,7 @@ def run_tune(
     *,
     resume: bool = True,
     force_rerun: bool = False,
+    dry_run: bool = False,
 ) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     combos = grid_combinations(spec)
@@ -474,7 +535,7 @@ def run_tune(
         name = config_name(spec, "tune", param_value, layer_label)
         metrics_path = None if force_rerun else try_find_metrics_path(name, spec.key)
         if metrics_path is not None and resume:
-            metrics = load_metrics(metrics_path)
+            metrics = load_primary_metrics(metrics_path)
             row = build_tune_row(
                 spec, name, param_value, layer_label, layers, metrics_path, metrics
             )
@@ -498,9 +559,12 @@ def run_tune(
             spec.tune_samples, log_attention=False,
         )
         cfg_path = write_config(cfg, spec.config_dir)
-        run_pipeline(cfg_path)
+        run_pipeline(cfg_path, dry_run=dry_run)
+        if dry_run:
+            print(f"[sb2c] dry-run: would run tune combo {name}", flush=True)
+            continue
         metrics_path = find_metrics_path(name, spec.key)
-        metrics = load_metrics(metrics_path)
+        metrics = load_primary_metrics(metrics_path)
         row = build_tune_row(
             spec, name, param_value, layer_label, layers, metrics_path, metrics
         )
@@ -522,18 +586,30 @@ def run_tune(
 def rebuild_tune_summary(spec: PipelineSpec) -> Dict[str, Any]:
     rows = collect_tune_rows_from_disk(spec)
     expected = len(grid_combinations(spec))
-    completed_all = len(rows) >= expected
+    completed_all = grid_metrics_complete(spec) or len(rows) >= expected
     print(
         f"[sb2c] [{spec.key}] rebuild summary from disk: "
-        f"{len(rows)} tune metrics found (expected {expected})",
+        f"{len(rows)} tune metrics found (expected {expected}, "
+        f"current_grid_complete={grid_metrics_complete(spec)})",
         flush=True,
     )
+    if not rows:
+        raise RuntimeError(
+            f"[sb2c] [{spec.key}] no tune metrics under "
+            f"result/experiments/scientsbank_2c/{spec.key}/"
+        )
     return write_tune_summary(
         spec, rows, completed_all=completed_all, expected_combos=expected
     )
 
 
-def run_full(spec: PipelineSpec, best: Dict[str, Any]) -> Dict[str, Any]:
+def run_full(
+    spec: PipelineSpec,
+    best: Dict[str, Any],
+    *,
+    resume: bool = True,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
     param_value = float(best[spec.param_name])
     layer_label = best["layers_label"]
     layers = best["layers"]
@@ -542,19 +618,29 @@ def run_full(spec: PipelineSpec, best: Dict[str, Any]) -> Dict[str, Any]:
         spec, "full", param_value, layer_label, layers_val,
         FULL_SAMPLES, log_attention=True,
     )
-    cfg["name"] = config_name(spec, "full", param_value, layer_label)
+    full_name = config_name(spec, "full", param_value, layer_label)
+    cfg["name"] = full_name
     cfg_path = write_config(cfg, spec.config_dir)
     spec.best_config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.best_config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
     print(f"[sb2c] full config → {spec.best_config_path}", flush=True)
-    run_pipeline(cfg_path)
-    metrics_path = find_metrics_path(cfg["name"], spec.key)
+
+    existing = None if not resume else try_find_metrics_path(full_name, spec.key)
+    if existing is not None:
+        print(f"[sb2c] full skip existing: {full_name} ({existing.name})", flush=True)
+        metrics_path = existing
+    else:
+        run_pipeline(cfg_path, dry_run=dry_run)
+        if dry_run:
+            print(f"[sb2c] dry-run: would run full {full_name}", flush=True)
+            return {"phase": "full", "pipeline": spec.key, "name": full_name, "dry_run": True}
+        metrics_path = find_metrics_path(full_name, spec.key)
     metrics = load_metrics(metrics_path)
     full_result = {
         "phase": "full",
         "pipeline": spec.key,
-        "name": cfg["name"],
+        "name": full_name,
         spec.param_name: param_value,
         "layers_label": layer_label,
         "max_samples": FULL_SAMPLES,
@@ -581,6 +667,7 @@ def run_pipeline_flow(
     force_rerun: bool = False,
     rebuild_summary: bool = False,
     allow_partial_tune: bool = False,
+    dry_run: bool = False,
 ) -> None:
     if spec.attack_method == "gcg_suffix_bank" and phase in ("tune", "full", "all"):
         ensure_suffix_bank()
@@ -589,10 +676,23 @@ def run_pipeline_flow(
     if rebuild_summary and phase in ("full", "all"):
         summary = rebuild_tune_summary(spec)
     elif phase in ("tune", "all"):
-        summary = run_tune(spec, resume=resume, force_rerun=force_rerun)
-        if phase == "all":
-            # 合并磁盘上已有 tune metrics（含旧版网格），再选最优跑 full
+        if (
+            phase == "all"
+            and resume
+            and not force_rerun
+            and grid_metrics_complete(spec)
+        ):
+            print(
+                f"[sb2c] [{spec.key}] current-grid tune complete; skip tune reruns",
+                flush=True,
+            )
             summary = rebuild_tune_summary(spec)
+        else:
+            summary = run_tune(
+                spec, resume=resume, force_rerun=force_rerun, dry_run=dry_run
+            )
+            if phase == "all":
+                summary = rebuild_tune_summary(spec)
     elif phase == "full":
         path = summary_path or (spec.summary_dir / "summary.json")
         if not path.is_file():
@@ -608,13 +708,14 @@ def run_pipeline_flow(
     if phase in ("full", "all"):
         if summary is None:
             raise RuntimeError(f"[sb2c] [{spec.key}] no tune summary available for full phase")
-        if summary.get("status") == "partial" and not allow_partial_tune:
+        if not tune_ready_for_full(spec, summary, allow_partial_tune=allow_partial_tune):
             raise SystemExit(
-                f"[sb2c] [{spec.key}] tune incomplete "
-                f"({summary.get('completed_combos')}/{summary.get('expected_combos')} combos). "
-                "Re-submit tune, or run full with --allow-partial-tune / ALLOW_PARTIAL_TUNE=1."
+                f"[sb2c] [{spec.key}] tune not ready for full "
+                f"({summary.get('completed_combos')}/{summary.get('expected_combos')} combos, "
+                f"current_grid_complete={grid_metrics_complete(spec)}). "
+                "Run PHASE=tune, or set ALLOW_PARTIAL_TUNE=1."
             )
-        run_full(spec, summary["best"])
+        run_full(spec, summary["best"], resume=resume, dry_run=dry_run)
 
 
 def parse_args() -> argparse.Namespace:
@@ -646,6 +747,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow full phase when tune grid did not fully complete",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate configs and flow without running main.py",
+    )
     return p.parse_args()
 
 
@@ -653,12 +759,19 @@ def main() -> None:
     args = parse_args()
     keys = list(PIPELINES.keys()) if args.pipeline == "all" else [args.pipeline]
     resume = not args.no_resume and not args.force_rerun
-    allow_partial = args.allow_partial_tune or os.environ.get("ALLOW_PARTIAL_TUNE", "") == "1"
+    allow_partial = (
+        args.allow_partial_tune
+        or os.environ.get("ALLOW_PARTIAL_TUNE", "") == "1"
+    )
     if any(PIPELINES[k].attack_method == "gcg_suffix_bank" for k in keys):
         ensure_suffix_bank()
+        # GCG 管线 HPC 上常有旧版 tune 结果；默认允许从已有 metrics 进入 full
+        if os.environ.get("ALLOW_PARTIAL_TUNE") is None and not args.allow_partial_tune:
+            allow_partial = True
     print(
         f"[sb2c] pipelines={keys} phase={args.phase} resume={resume} "
-        f"rebuild_summary={args.rebuild_summary} allow_partial_tune={allow_partial}",
+        f"rebuild_summary={args.rebuild_summary} allow_partial_tune={allow_partial} "
+        f"dry_run={args.dry_run}",
         flush=True,
     )
     for key in keys:
@@ -671,7 +784,9 @@ def main() -> None:
             force_rerun=args.force_rerun,
             rebuild_summary=args.rebuild_summary,
             allow_partial_tune=allow_partial,
+            dry_run=args.dry_run,
         )
+    print("[sb2c] done", flush=True)
 
 
 if __name__ == "__main__":
