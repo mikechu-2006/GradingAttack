@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-SciEntsBank 2 分类 · 四管线（GCG-SuffixBank/RolePlay × HS/AS）调参 → 全量。
+SciEntsBank 2 分类 · 十管线调参 → 全量。
 
-- GCG 管线使用 gcg_suffix_bank（预构建后缀库迁移攻击，见 GCG_README.md）
-- tune: 每组 10 条，6 组超参（3×2 层），无 attention
-- full: 100 条，log_attention=true，四路径 attention + top5 + [SAMPLE] 日志
+攻击 × 防御:
+  - gcg_hs / gcg_as      (gcg_suffix_bank, tune 10 / full 100)
+  - roleplay_hs / roleplay_as (RolePlay, tune 10 / full 100)
+  - ao_hs / ao_as        (Injection Authority Override, tune 5 / full 50)
+  - dc_hs / dc_as        (Injection Delimiter Confusion, tune 5 / full 50)
+  - im_hs / im_as        (Injection Instruction Mimicry, tune 5 / full 50)
+
+- tune: 6 组超参（3×2 层），无 attention
+- full: log_attention=true，四路径 attention + top5 + [SAMPLE] 日志
 - 选优：score = 0.8×ASR_defended + 0.2×|QWK_clean−QWK_def_clean|，取 score 最小
-
-调参规模（6 combos × 10 samples = 60 次样本运行/管线）：
 """
 
 from __future__ import annotations
@@ -30,7 +34,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 TUNE_SAMPLES_GCG = 10
 TUNE_SAMPLES_ROLEPLAY = 10
+TUNE_SAMPLES_INJECTION = 5
 FULL_SAMPLES = 100
+FULL_SAMPLES_INJECTION = 50
 RANDOM_SEED = 42
 
 ROLEPLAY_ADV = (
@@ -98,6 +104,19 @@ LAYER_LOOKUP: Dict[str, Union[str, List[int]]] = {
 }
 
 
+def _load_injection_prompt(config_file: str) -> str:
+    path = REPO_ROOT / "configs" / "injection" / config_file
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)["params"]["injection_prompt"]
+
+
+INJECTION_PROMPTS: Dict[str, str] = {
+    "ao": _load_injection_prompt("ao-cluster-2c.yaml"),
+    "dc": _load_injection_prompt("dc-cluster-2c.yaml"),
+    "im": _load_injection_prompt("im-cluster-2c.yaml"),
+}
+
+
 @dataclass(frozen=True)
 class PipelineSpec:
     key: str
@@ -110,6 +129,8 @@ class PipelineSpec:
     default_params: Dict[str, Any]
     extra_fixed: Dict[str, Any]
     tune_samples: int
+    full_samples: int = FULL_SAMPLES
+    injection_short: str = ""
 
     @property
     def config_dir(self) -> Path:
@@ -176,9 +197,65 @@ PIPELINES: Dict[str, PipelineSpec] = {
 }
 
 
+def _injection_spec(injection_short: str, defense_type: str, defense_short: str) -> PipelineSpec:
+    key = f"{injection_short}_{defense_short}"
+    if defense_short == "hs":
+        return PipelineSpec(
+            key=key,
+            tag=key,
+            attack_method="Injection",
+            defense_type=defense_type,
+            defense_short=defense_short,
+            param_name="beta",
+            param_grid=[0.05, 0.1, 0.2],
+            default_params={
+                "beta": 0.1,
+                "top_fraction": 0.01,
+                "layers": [24, 25, 26, 27, 28, 29, 30, 31],
+            },
+            extra_fixed={"top_fraction": 0.01},
+            tune_samples=TUNE_SAMPLES_INJECTION,
+            full_samples=FULL_SAMPLES_INJECTION,
+            injection_short=injection_short,
+        )
+    return PipelineSpec(
+        key=key,
+        tag=key,
+        attack_method="Injection",
+        defense_type=defense_type,
+        defense_short=defense_short,
+        param_name="temperature",
+        param_grid=[0.6, 0.7, 0.8],
+        default_params={
+            "temperature": 0.7,
+            "layers": [24, 25, 26, 27, 28, 29, 30, 31],
+        },
+        extra_fixed={},
+        tune_samples=TUNE_SAMPLES_INJECTION,
+        full_samples=FULL_SAMPLES_INJECTION,
+        injection_short=injection_short,
+    )
+
+
+PIPELINES.update(
+    {
+        "ao_hs": _injection_spec("ao", "hijacking_suppression", "hs"),
+        "ao_as": _injection_spec("ao", "attention_sharpening", "as"),
+        "dc_hs": _injection_spec("dc", "hijacking_suppression", "hs"),
+        "dc_as": _injection_spec("dc", "attention_sharpening", "as"),
+        "im_hs": _injection_spec("im", "hijacking_suppression", "hs"),
+        "im_as": _injection_spec("im", "attention_sharpening", "as"),
+    }
+)
+
+
 def _attack_tag(spec: PipelineSpec) -> str:
     if spec.attack_method in ("GCG", "gcg_suffix_bank"):
         return "gcg"
+    if spec.attack_method == "RolePlay":
+        return "rp"
+    if spec.injection_short:
+        return spec.injection_short
     return "rp"
 
 
@@ -211,6 +288,8 @@ def _shared_base(spec: PipelineSpec, max_samples: int, log_attention: bool) -> D
         cfg["params"]["bank_path"] = resolve_suffix_bank_path()
     elif spec.attack_method == "RolePlay":
         cfg["params"] = {"adv_prompt": ROLEPLAY_ADV}
+    elif spec.attack_method == "Injection":
+        cfg["params"] = {"injection_prompt": INJECTION_PROMPTS[spec.injection_short]}
     return cfg
 
 
@@ -459,7 +538,7 @@ def write_tune_summary(
         "attack": spec.attack_method,
         "defense": spec.defense_type,
         "tune_samples": spec.tune_samples,
-        "full_samples": FULL_SAMPLES,
+        "full_samples": spec.full_samples,
         "random_seed": RANDOM_SEED,
         "selection_note": "auto-best: min score = 0.8*ASR_defended + 0.2*|QWK_clean-QWK_def_clean|",
         "score_formula": "0.8 * asr_defended + 0.2 * |qwk_clean - qwk_defense_clean|",
@@ -616,7 +695,7 @@ def run_full(
     layers_val: Union[str, List[int]] = "all" if layers == "all" else layers
     cfg = build_config(
         spec, "full", param_value, layer_label, layers_val,
-        FULL_SAMPLES, log_attention=True,
+        spec.full_samples, log_attention=True,
     )
     full_name = config_name(spec, "full", param_value, layer_label)
     cfg["name"] = full_name
@@ -643,7 +722,7 @@ def run_full(
         "name": full_name,
         spec.param_name: param_value,
         "layers_label": layer_label,
-        "max_samples": FULL_SAMPLES,
+        "max_samples": spec.full_samples,
         "metrics_path": str(metrics_path.relative_to(REPO_ROOT)),
         **{k: metrics[k] for k in [
             "asr", "asr_defended", "qwk_clean", "qwk_attack",
@@ -765,7 +844,9 @@ def main() -> None:
     )
     if any(PIPELINES[k].attack_method == "gcg_suffix_bank" for k in keys):
         ensure_suffix_bank()
-        # GCG 管线 HPC 上常有旧版 tune 结果；默认允许从已有 metrics 进入 full
+    if any(
+        PIPELINES[k].attack_method in ("gcg_suffix_bank", "Injection") for k in keys
+    ):
         if os.environ.get("ALLOW_PARTIAL_TUNE") is None and not args.allow_partial_tune:
             allow_partial = True
     print(

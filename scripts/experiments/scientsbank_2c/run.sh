@@ -30,9 +30,9 @@ fi
 if [ "${DRY_RUN:-0}" = "1" ]; then
   SB2C_ARGS+=(--dry-run)
 fi
-# GCG 管线：HPC 上 tune 常已完成，默认允许从已有 metrics 进入 full
+# GCG / Injection 管线：HPC 上 tune 常已完成，默认允许从已有 metrics 进入 full
 case "${PIPELINE}" in
-  gcg_hs|gcg_as)
+  gcg_hs|gcg_as|ao_hs|ao_as|dc_hs|dc_as|im_hs|im_as)
     ALLOW_PARTIAL_TUNE="${ALLOW_PARTIAL_TUNE:-1}"
     ;;
 esac

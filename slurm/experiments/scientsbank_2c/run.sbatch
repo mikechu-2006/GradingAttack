@@ -6,10 +6,14 @@
 #SBATCH --gres=gpu:1
 #SBATCH -t 7-00:00:00
 
-# SciEntsBank 2c 四管线: tune → full (100)
+# SciEntsBank 2c 十管线: tune → full
+#  - gcg/roleplay: tune 10 / full 100
+#  - injection (ao/dc/im): tune 5 / full 50
 # 默认 suffix bank: result_from_hpc_gcg_suffix_bank/gcg_suffix_bank_2c_his.jsonl
 # 示例:
 #   PIPELINE=gcg_hs sbatch slurm/experiments/scientsbank_2c/run.sbatch
+#   PIPELINE=ao_hs sbatch slurm/experiments/scientsbank_2c/run.sbatch
+#   sbatch run_pipeline_injection_ao_hs.sh
 #   PIPELINE=all PHASE=tune sbatch slurm/experiments/scientsbank_2c/run.sbatch
 # GCG 管线 tune 较慢；若 tune 中断导致没有 full，可从已有 metrics 重建 summary 后直接跑 full:
 #   PIPELINE=gcg_hs PHASE=full REBUILD_SUMMARY=1 ALLOW_PARTIAL_TUNE=1 sbatch slurm/experiments/scientsbank_2c/run.sbatch
