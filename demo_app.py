@@ -318,7 +318,7 @@ def _call_vllm(
     return outputs[0].outputs[0].text
 
 
-# ── CSS for beautiful animations ─────────────────────────────────────────────
+# ── CSS for beautiful dark-mode UI ────────────────────────────────────────────
 
 CUSTOM_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -335,28 +335,29 @@ CUSTOM_CSS = """
     padding: 1.5rem 0 0.5rem 0;
 }
 .app-title h1 {
-    font-size: 2.2rem;
+    font-size: 2.4rem;
     font-weight: 700;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6, #d946ef);
+    background: linear-gradient(135deg, #818cf8, #a78bfa, #e879f9);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin-bottom: 0.25rem;
+    letter-spacing: -0.03em;
 }
 .app-title p {
-    color: #6b7280;
+    color: #94a3b8;
     font-size: 0.95rem;
 }
 
 /* ── Verdict card ── */
 @keyframes verdictPopIn {
-    0% { transform: scale(0.8); opacity: 0; }
-    60% { transform: scale(1.04); }
+    0% { transform: scale(0.85); opacity: 0; }
+    60% { transform: scale(1.03); }
     100% { transform: scale(1); opacity: 1; }
 }
-@keyframes correctPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-    50% { box-shadow: 0 0 0 16px rgba(16, 185, 129, 0); }
+@keyframes correctGlow {
+    0%, 100% { box-shadow: 0 0 20px rgba(52, 211, 153, 0.15), inset 0 0 20px rgba(52, 211, 153, 0.05); }
+    50% { box-shadow: 0 0 40px rgba(52, 211, 153, 0.3), inset 0 0 30px rgba(52, 211, 153, 0.1); }
 }
 @keyframes incorrectShake {
     0%, 100% { transform: translateX(0); }
@@ -367,39 +368,41 @@ CUSTOM_CSS = """
     75% { transform: translateX(-3px); }
     90% { transform: translateX(3px); }
 }
-@keyframes glowBorder {
-    0%, 100% { border-color: rgba(99, 102, 241, 0.3); }
-    50% { border-color: rgba(99, 102, 241, 0.8); }
+@keyframes borderPulse {
+    0%, 100% { border-color: rgba(129, 140, 248, 0.3); }
+    50% { border-color: rgba(129, 140, 248, 0.6); }
 }
 .verdict-card {
     border-radius: 16px;
-    padding: 1.75rem 2rem;
+    padding: 2rem 2.5rem;
     text-align: center;
     animation: verdictPopIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     margin: 1rem 0;
-    border: 2px solid;
+    border: 1.5px solid;
     transition: all 0.3s ease;
+    backdrop-filter: blur(8px);
 }
 .verdict-card.correct {
-    background: linear-gradient(135deg, #ecfdf5, #d1fae5);
-    border-color: #10b981;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(52, 211, 153, 0.08));
+    border-color: rgba(52, 211, 153, 0.4);
     animation: verdictPopIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275),
-               correctPulse 2s ease-in-out 0.6s;
+               correctGlow 2.5s ease-in-out 0.6s;
 }
 .verdict-card.contradictory {
-    background: linear-gradient(135deg, #fffbeb, #fef3c7);
-    border-color: #f59e0b;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(251, 191, 36, 0.08));
+    border-color: rgba(251, 191, 36, 0.4);
 }
 .verdict-card.incorrect {
-    background: linear-gradient(135deg, #fef2f2, #fee2e2);
-    border-color: #ef4444;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(248, 113, 113, 0.08));
+    border-color: rgba(248, 113, 113, 0.4);
     animation: verdictPopIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275),
                incorrectShake 0.5s ease-in-out 0.6s;
 }
 .verdict-icon {
-    font-size: 3rem;
+    font-size: 3.5rem;
     display: block;
     margin-bottom: 0.5rem;
+    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.1));
 }
 .verdict-label {
     font-size: 1.6rem;
@@ -407,74 +410,46 @@ CUSTOM_CSS = """
     letter-spacing: -0.02em;
 }
 .verdict-reason {
-    font-size: 0.9rem;
-    color: #6b7280;
-    margin-top: 0.5rem;
-    line-height: 1.5;
+    font-size: 0.88rem;
+    color: #94a3b8;
+    margin-top: 0.75rem;
+    line-height: 1.6;
     white-space: pre-wrap;
 }
+.verdict-reason summary {
+    color: #a5b4fc !important;
+}
 
-/* ── Question card ── */
+/* ── Question / Solution cards ── */
 .question-card {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1rem;
+    background: rgba(30, 41, 59, 0.7) !important;
+    border: 1px solid rgba(71, 85, 105, 0.4) !important;
+    border-radius: 14px !important;
+    padding: 1.25rem 1.5rem !important;
+    margin-bottom: 0.5rem !important;
+    backdrop-filter: blur(6px);
 }
-.question-card .label {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    color: #6366f1;
-    margin-bottom: 0.5rem;
+.question-card label {
+    color: #a5b4fc !important;
 }
-.question-card .text {
-    font-size: 0.95rem;
-    color: #1e293b;
-    line-height: 1.6;
+.question-card textarea {
+    color: #e2e8f0 !important;
+    background: transparent !important;
 }
 
-/* ── Loading spinner ── */
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-.loading-spinner {
-    display: inline-block;
-    width: 20px;
-    height: 20px;
-    border: 2.5px solid #e2e8f0;
-    border-top-color: #6366f1;
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-    margin-right: 8px;
-    vertical-align: middle;
+/* ── Section headings ── */
+h3 {
+    font-weight: 600 !important;
+    letter-spacing: -0.01em;
 }
 
-/* ── Stats row ── */
-.stats-row {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    flex-wrap: wrap;
-    margin: 1rem 0;
-}
-.stat-chip {
-    background: #f1f5f9;
-    border-radius: 999px;
-    padding: 0.4rem 1rem;
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: #475569;
-}
-
-/* ── Misc ── */
+/* ── Footer ── */
 .footer-text {
     text-align: center;
-    color: #94a3b8;
+    color: #475569;
     font-size: 0.78rem;
     margin-top: 2rem;
+    padding-bottom: 1rem;
 }
 """
 
@@ -671,7 +646,7 @@ def create_demo():
         gr.HTML("""
         <div class="app-title">
             <h1>🎓 GradingAttack Demo</h1>
-            <p>Automated Short-Answer Grading with Commercial LLMs</p>
+            <p>Automated Short-Answer Grading — Attack &amp; Defense Evaluation</p>
         </div>
         """)
 
@@ -795,7 +770,7 @@ def create_demo():
         # ── Footer ──
         gr.HTML("""
         <div class="footer-text">
-            GradingAttack · ICLR 2026 · Powered by Gradio + Commercial LLM APIs
+            GradingAttack &middot; ICLR 2026 &middot; vLLM + Gradio + ModelScope
         </div>
         """)
 
@@ -871,5 +846,29 @@ if __name__ == "__main__":
             neutral_hue="slate",
             radius_size="lg",
             font=gr.themes.GoogleFont("Inter"),
+        ).set(
+            body_background_fill="linear-gradient(135deg, #0f172a, #1e1b4b)",
+            body_background_fill_dark="linear-gradient(135deg, #0f172a, #1e1b4b)",
+            block_background_fill="#1e293b",
+            block_background_fill_dark="#1e293b",
+            block_border_color="#334155",
+            block_border_width="1px",
+            block_label_background_fill="transparent",
+            block_label_text_color="#cbd5e1",
+            block_title_text_color="#e2e8f0",
+            input_background_fill="#0f172a",
+            input_background_fill_dark="#0f172a",
+            input_border_color="#334155",
+            input_border_color_focus="#818cf8",
+            button_primary_background_fill="linear-gradient(135deg, #6366f1, #8b5cf6)",
+            button_primary_background_fill_hover="linear-gradient(135deg, #818cf8, #a78bfa)",
+            button_primary_text_color="#ffffff",
+            button_secondary_background_fill="#334155",
+            button_secondary_background_fill_hover="#475569",
+            button_secondary_text_color="#cbd5e1",
+            background_fill_primary="#0f172a",
+            background_fill_secondary="#1e293b",
+            border_color_accent="#818cf8",
+            color_accent_soft="#312e81",
         ),
     )
