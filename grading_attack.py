@@ -11,7 +11,7 @@ def _defense_type_key(defense_type: str) -> str:
 
 
 def _needs_eager_attention(config: AttackConfig) -> bool:
-    if config.debug:
+    if config.debug or config.log_attention:
         return True
     if not config.defenses:
         return False

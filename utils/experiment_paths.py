@@ -46,18 +46,32 @@ def roleplay_defense_dir(config: AttackConfig) -> Optional[str]:
 
 
 def scientsbank_2c_pipeline_id(config: AttackConfig) -> Optional[str]:
-    """从 run name 解析 pipeline id，如 scientsbank-2c-gcg-hs-full → gcg_hs。"""
+    """Parse pipeline id from scientsbank_2c run names.
+
+    Examples:
+      scientsbank-2c-gcg-hs-full -> gcg_hs
+      scientsbank-2c-ao-as-qwen3-4b-full -> ao_as_qwen3_4b
+    """
     name = config.name or ""
     if not name.startswith("scientsbank-2c-"):
         return None
     rest = name[len("scientsbank-2c-"):]
     parts = rest.split("-")
-    if len(parts) >= 2:
-        attack = parts[0]
-        if attack == "rp":
-            attack = "roleplay"
-        return f"{attack}_{parts[1]}"
-    return None
+    if len(parts) < 2:
+        return None
+    attack = parts[0]
+    if attack == "rp":
+        attack = "roleplay"
+    defense = parts[1]
+
+    phase_idx = None
+    for idx, part in enumerate(parts[2:], start=2):
+        if part in ("tune", "full"):
+            phase_idx = idx
+            break
+    model_parts = parts[2:phase_idx] if phase_idx is not None else []
+    model_suffix = "_" + "_".join(model_parts) if model_parts else ""
+    return f"{attack}_{defense}{model_suffix}"
 
 
 def is_scientsbank_2c_experiment(config: AttackConfig) -> bool:

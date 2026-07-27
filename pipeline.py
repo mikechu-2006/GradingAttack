@@ -244,9 +244,22 @@ class GradingDefensePipeline:
                     flush=True,
                 )
 
+        manual_excluded_indices = config.params.get("exclude_source_indices") or []
+        if manual_excluded_indices:
+            bank_source_indices.update(int(i) for i in manual_excluded_indices)
+            print(
+                f"[pipeline] Excluding {len(manual_excluded_indices)} manual source indices "
+                f"from heldout evaluation.",
+                flush=True,
+            )
+
         for data_config in config.data_config:
             full_data_list = read_student_qa_data_from_jsonl(data_config.path)
-            indexed_samples = list(enumerate(full_data_list))
+            indexed_samples = [
+                (source_index, data)
+                for source_index, data in enumerate(full_data_list)
+                if source_index not in bank_source_indices
+            ]
             if data_config.max_samples and data_config.max_samples < len(indexed_samples):
                 rng = random.Random(data_config.random_seed)
                 indexed_samples = rng.sample(indexed_samples, data_config.max_samples)
@@ -261,7 +274,7 @@ class GradingDefensePipeline:
                 if bank_source_indices and source_index in bank_source_indices:
                     print(
                         f"[pipeline] Skipping sample source_index={source_index}: "
-                        f"found in bank source indices",
+                        f"found in excluded source indices",
                         flush=True,
                     )
                     continue
@@ -381,35 +394,42 @@ class GradingDefensePipeline:
                             import time as _sbtime
                             from eval.metrics import _parse_grade
 
-                            # Blind prompt for suffix bank search (no solution)
-                            blind_p = config.grading_template.format(
-                                question=data.question,
-                                solution="",
-                                student_answer=data.student_answer,
-                            )
-                            for d in self.structural_defenses:
-                                blind_p = d.pre_process(blind_p)
-
+                            # The bank was built in a blind setting, but transfer
+                            # evaluation must grade with the full ASAG prompt,
+                            # including the reference solution.
                             t_start = _sbtime.perf_counter()
                             success_suffix_index = None
                             success_suffix = None
                             promotion_suffix_index = None
                             promotion_suffix = None
+                            best_suffix_index = None
+                            best_suffix = None
                             suffixes_tried = 0
-                            insert_pos_sb = blind_p.rfind(end_tag)
+                            insert_pos_sb = p.rfind(end_tag)
                             original_grade_for_bank = _parse_grade(orig_resp, config.nclass)
+                            best_grade_for_bank = original_grade_for_bank
 
                             for s_idx, s in enumerate(bank):
                                 suffixes_tried += 1
                                 if insert_pos_sb != -1:
-                                    test_content = blind_p[:insert_pos_sb] + s + end_tag
+                                    test_content = p[:insert_pos_sb] + s + end_tag
                                 else:
-                                    test_content = blind_p + s
+                                    test_content = p + s
 
                                 test_resp = self._generate(
                                     [{"role": "user", "content": test_content}]
                                 )
                                 test_grade = _parse_grade(test_resp, config.nclass)
+
+                                if (test_grade is not None
+                                        and (best_grade_for_bank is None
+                                             or test_grade < best_grade_for_bank)):
+                                    best_grade_for_bank = test_grade
+                                    best_suffix_index = s_idx
+                                    best_suffix = s
+                                    resp = test_resp
+                                    suffix = s
+                                    msgs[0]["content"] = test_content
 
                                 if (original_grade_for_bank is not None
                                         and test_grade is not None
@@ -419,16 +439,8 @@ class GradingDefensePipeline:
                                     promotion_suffix = s
 
                                 if test_grade == 0:  # 0 = correct
-                                    resp = test_resp
-                                    suffix = s
                                     success_suffix_index = s_idx
                                     success_suffix = s
-                                    # Build final attacked message from full prompt
-                                    full_insert_pos = p.rfind(end_tag)
-                                    if full_insert_pos != -1:
-                                        msgs[0]["content"] = p[:full_insert_pos] + s + end_tag
-                                    else:
-                                        msgs[0]["content"] = p + s
                                     break
 
                             t_end = _sbtime.perf_counter()
@@ -436,7 +448,8 @@ class GradingDefensePipeline:
                                 f"[SuffixBank] Tried {suffixes_tried}/{len(bank)} suffixes "
                                 f"in {t_end - t_start:.1f}s, "
                                 f"success_idx={success_suffix_index}, "
-                                f"promotion_idx={promotion_suffix_index}",
+                                f"promotion_idx={promotion_suffix_index}, "
+                                f"best_idx={best_suffix_index}",
                                 flush=True,
                             )
 
@@ -445,6 +458,8 @@ class GradingDefensePipeline:
                                 "success_suffix": success_suffix,
                                 "promotion_suffix_index": promotion_suffix_index,
                                 "promotion_suffix": promotion_suffix,
+                                "best_suffix_index": best_suffix_index,
+                                "best_suffix": best_suffix,
                                 "suffixes_tried": suffixes_tried,
                                 "bank_path": config.params.get("bank_path"),
                                 "bank_size": len(bank),
@@ -731,6 +746,7 @@ class GradingDefensePipeline:
                         for key in (
                             "success_suffix_index", "success_suffix",
                             "promotion_suffix_index", "promotion_suffix",
+                            "best_suffix_index", "best_suffix",
                             "suffixes_tried", "bank_path", "bank_size",
                         ):
                             if key in bank_meta:

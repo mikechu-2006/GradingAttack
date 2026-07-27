@@ -1,0 +1,25 @@
+============================================================
+[RUN_CONFIG] Experiment metadata
+============================================================
+  name:          Pipeline-RolePlay-Fixed-Llama-3.1-8B-Instruct-3c-heldout500-attention
+  attack_method: RolePlay
+  model:         Llama-3.1-8B-Instruct
+  model_path:    (auto-download)
+  model_id:      LLM-Research/Meta-Llama-3.1-8B-Instruct
+  template:      ci
+  nclass:        3
+  log_attention: True
+
+  [generation]
+    temperature:   0.01
+    max_tokens:    1024
+
+  [data #1]
+    name:          scientsbank
+    path:          ./dataset/scientsbank.jsonl
+    max_samples:   500
+    random_seed:   42
+
+  [defenses] (none)
+
+============================================================

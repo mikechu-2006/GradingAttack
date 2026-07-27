@@ -146,7 +146,7 @@ def has_attention_sharpening(config: AttackConfig) -> bool:
 
 
 def needs_eager_attention(config: AttackConfig) -> bool:
-    if config.debug:
+    if config.debug or config.log_attention:
         return True
     if not config.defenses:
         return False

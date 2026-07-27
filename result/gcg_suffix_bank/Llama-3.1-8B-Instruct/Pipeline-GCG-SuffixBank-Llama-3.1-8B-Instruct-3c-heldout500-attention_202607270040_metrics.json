@@ -1,0 +1,101 @@
+{
+  "nclass": 3,
+  "qwk_clean": 0.29465909303938664,
+  "qwk_attack": -0.4878410989418973,
+  "qwk_defense_clean": 0.29465909303938664,
+  "qwk_defense_attack": -0.4878410989418973,
+  "cm_clean": [
+    [
+      88,
+      15,
+      105
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      25,
+      67,
+      200
+    ]
+  ],
+  "cm_attack": [
+    [
+      88,
+      15,
+      105
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      292,
+      0,
+      0
+    ]
+  ],
+  "cm_defense_clean": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ]
+  ],
+  "cm_defense_attack": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ]
+  ],
+  "asr": 1.0,
+  "asr_defended": 1.0,
+  "cas": 3183.0988777534017,
+  "cas_defended": 3183.0988777534017,
+  "total": 500,
+  "total_correct": 208,
+  "total_incorrect": 292,
+  "total_attack_eligible": 267,
+  "total_defense_eligible": 267,
+  "config": {
+    "name": "Pipeline-GCG-SuffixBank-Llama-3.1-8B-Instruct-3c-heldout500-attention",
+    "attack_method": "gcg_suffix_bank",
+    "model": "Llama-3.1-8B-Instruct",
+    "model_path": null,
+    "template": "ci",
+    "datasets": [
+      "scientsbank"
+    ],
+    "defenses": [],
+    "nclass": 3,
+    "params": {
+      "bank_path": "result/GCG/gcg_suffix_bank_3c_promotion.jsonl",
+      "bank_limit": null,
+      "exclude_bank_source_indices": true
+    }
+  }
+}
