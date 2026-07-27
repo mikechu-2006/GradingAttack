@@ -9,12 +9,15 @@
 # Activate conda environment
 source scripts/activate_gradingattack_env.sh
 
-# Set your API keys here (or export them before submitting)
+# For DeepSeek API (remote model only)
 # export DEEPSEEK_API_KEY="your-key-here"
-# export LOCAL_LLM_API_KEY="your-key-here"
+
+# Use ModelScope to download / load models
+export VLLM_USE_MODELSCOPE=True
 
 echo "Launching GradingAttack Demo..."
-echo "Check the output below for the gradio.live share link:"
+echo "Local models run via vLLM; deepseek-chat uses API."
+echo "Check below for the gradio.live share link:"
 echo "----------------------------------------"
 
 python demo_app.py

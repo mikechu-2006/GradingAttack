@@ -9,6 +9,9 @@ import os
 import re
 from pathlib import Path
 
+# Use ModelScope as the model source for vLLM on HPC
+os.environ.setdefault("VLLM_USE_MODELSCOPE", "True")
+
 import gradio as gr
 
 # ── Config loading ───────────────────────────────────────────────────────────
@@ -243,6 +246,63 @@ def call_openai(prompt: str, api_key: str, base_url: str,
     return resp.choices[0].message.content
 
 
+# ── vLLM backend for local models ────────────────────────────────────────────
+
+_vllm_cache: dict = {}  # model_name -> LLM instance
+
+
+def _get_vllm_model(model_name: str, model_path: str, model_id: str):
+    """Get or create a cached vLLM model instance.
+
+    Uses model_path (local cache) if it exists on disk, otherwise falls back
+    to model_id (fetched from ModelScope when VLLM_USE_MODELSCOPE=True).
+    Models are lazy-loaded on first use and kept in memory.
+    """
+    if model_name not in _vllm_cache:
+        import gc
+        import torch
+        from vllm import LLM
+
+        # Free memory before loading a new model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # Prefer local cache path; fall back to ModelScope model ID
+        model_source = model_path if model_path and os.path.isdir(model_path) else model_id
+        if model_path and os.path.isdir(model_path):
+            print(f"[vLLM] Loading {model_name} from local cache: {model_path}")
+        else:
+            print(f"[vLLM] Loading {model_name} from ModelScope: {model_id}")
+
+        _vllm_cache[model_name] = LLM(
+            model=model_source,
+            trust_remote_code=True,
+            max_model_len=4096,
+            gpu_memory_utilization=0.85,
+        )
+    return _vllm_cache[model_name]
+
+
+def _call_vllm(
+    model_name: str,
+    model_path: str,
+    model_id: str,
+    prompt: str,
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    """Run inference via vLLM on a locally-loaded model."""
+    from vllm import SamplingParams
+
+    llm = _get_vllm_model(model_name, model_path, model_id)
+    sampling_params = SamplingParams(
+        temperature=temperature if temperature > 0 else 0.0,
+        max_tokens=max_tokens,
+    )
+    outputs = llm.generate([prompt], sampling_params)
+    return outputs[0].outputs[0].text
+
+
 # ── CSS for beautiful animations ─────────────────────────────────────────────
 
 CUSTOM_CSS = """
@@ -467,14 +527,16 @@ def on_submit(
     """Run grading via the selected LLM (API credentials from config)."""
     nclass = 2  # fixed to 2-class grading
 
-    # ── Resolve credentials for this model ──
+    # ── Resolve model config ──
     mcfg = MODELS.get(model, {})
-    api_key = os.environ.get(mcfg.get("api_key_env", ""), "")
-    base_url = mcfg.get("base_url", "")
+    backend = mcfg.get("backend", "api")
 
-    if not api_key:
-        env_var = mcfg.get("api_key_env", "API_KEY")
-        return _build_empty_verdict(), f"⚠️ Set the `{env_var}` environment variable."
+    if backend == "api":
+        api_key = os.environ.get(mcfg.get("api_key_env", ""), "")
+        base_url = mcfg.get("base_url", "")
+        if not api_key:
+            env_var = mcfg.get("api_key_env", "API_KEY")
+            return _build_empty_verdict(), f"⚠️ Set the `{env_var}` environment variable."
     if not student_answer.strip():
         return _build_empty_verdict(), "⚠️ Please enter a student answer to grade."
 
@@ -492,13 +554,21 @@ def on_submit(
     # ── Apply defense (wraps the whole prompt) ──
     prompt = apply_defense(prompt, defense_method)
 
-    # ── Call LLM (all models use OpenAI-compatible API) ──
+    # ── Run inference ──
     try:
-        response = call_openai(
-            prompt, api_key, base_url, model, temperature, max_tokens,
-        )
+        if backend == "api":
+            response = call_openai(
+                prompt, api_key, base_url, model, temperature, max_tokens,
+            )
+        else:
+            response = _call_vllm(
+                model,
+                mcfg.get("model_path", ""),
+                mcfg.get("model_id", ""),
+                prompt, temperature, max_tokens,
+            )
     except Exception as e:
-        return _build_empty_verdict(), f"❌ API Error: {e}"
+        return _build_empty_verdict(), f"❌ Error: {e}"
 
     # ── Parse verdict ──
     verdict = _parse_verdict(response)
