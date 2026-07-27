@@ -7,27 +7,27 @@
     },
     "Llama-3.1-8B-Instruct": {
       "model_id": "LLM-Research/Llama-3.1-8B-Instruct",
-      "model_path": "/hpc2ssd/softwares/models/Llama-3.1-8B-Instruct",
+      "model_path": "",
       "backend": "vllm"
     },
     "Qwen2.5-7B-Instruct": {
       "model_id": "Qwen/Qwen2.5-7B-Instruct",
-      "model_path": "/hpc2ssd/softwares/models/Qwen2.5-7B-Instruct",
+      "model_path": "",
       "backend": "vllm"
     },
     "Mistral-7B-Instruct": {
       "model_id": "LLM-Research/Mistral-7B-Instruct-v0.3",
-      "model_path": "/hpc2ssd/softwares/models/Mistral-7B-Instruct-v0.3",
+      "model_path": "",
       "backend": "vllm"
     },
     "Qwen3-4B-Instruct-2507": {
       "model_id": "Qwen/Qwen3-4B-Instruct-2507",
-      "model_path": "/hpc2ssd/softwares/models/Qwen3-4B-Instruct-2507",
+      "model_path": "",
       "backend": "vllm"
     },
     "Qwen3.5-4B": {
       "model_id": "Qwen/Qwen3.5-4B",
-      "model_path": "/hpc2ssd/softwares/models/Qwen3.5-4B",
+      "model_path": "",
       "backend": "vllm"
     }
   },

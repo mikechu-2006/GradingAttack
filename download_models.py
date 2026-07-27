@@ -2,7 +2,7 @@
 """Pre-download models from ModelScope to local cache for the GradingAttack demo.
 
 Reads demo_config.json, and for each vllm model downloads it from ModelScope
-to the specified model_path directory. Skips models whose path already exists.
+to ~/.cache/modelscope/hub/<model_id>.  Skips models already cached.
 """
 
 import json
@@ -14,44 +14,32 @@ PROJECT_DIR = Path(__file__).parent
 CONFIG_PATH = PROJECT_DIR / "demo_config.json"
 
 
-def download_model(model_id: str, model_path: str) -> bool:
-    """Download a model from ModelScope to a local directory.
+def download_model(model_id: str) -> bool:
+    """Download a model from ModelScope to the local cache.
 
-    Uses modelscope.snapshot_download to fetch the full model snapshot.
-    Returns True on success, False on failure.
+    Uses modelscope.snapshot_download.  Returns True on success.
     """
-    if os.path.isdir(model_path) and any(
-        f.endswith((".safetensors", ".bin", ".pt")) for f in os.listdir(model_path)
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "modelscope", "hub")
+    cached = os.path.join(cache_dir, model_id.replace("/", "___"))
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # Quick check: does it look like model weights are already there?
+    if os.path.isdir(cached) and any(
+        f.endswith((".safetensors", ".bin", ".pt"))
+        for f in os.listdir(cached)
     ):
-        print(f"  [SKIP] Already exists: {model_path}")
+        print(f"  [SKIP] Already cached: {cached}")
         return True
 
     try:
         from modelscope import snapshot_download
     except ImportError:
-        print("  [FALLBACK] modelscope not installed, trying huggingface_hub...")
-        try:
-            from huggingface_hub import snapshot_download as hf_snapshot_download
-            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-            hf_snapshot_download(
-                model_id, local_dir=model_path,
-                local_dir_use_symlinks=False, resume_download=True,
-            )
-            print(f"  [OK] Downloaded to {model_path}")
-            return True
-        except ImportError:
-            print("  [ERROR] Neither modelscope nor huggingface_hub is installed.")
-            print("  Install with: pip install modelscope")
-            return False
+        print("  [ERROR] modelscope not installed. Run: pip install modelscope")
+        return False
 
-    print(f"  Downloading {model_id} -> {model_path} ...")
-    os.makedirs(model_path, exist_ok=True)
-    snapshot_download(
-        model_id,
-        cache_dir=model_path,
-        local_dir=model_path,
-    )
-    print(f"  [OK] Downloaded to {model_path}")
+    print(f"  Downloading {model_id} -> {cached} ...")
+    snapshot_download(model_id, cache_dir=cache_dir)
+    print(f"  [OK] Cached at {cached}")
     return True
 
 
@@ -69,18 +57,17 @@ def main():
         print("No vLLM models found in config.")
         return
 
-    print(f"Found {len(vllm_models)} vLLM model(s) to prepare.\n")
+    print(f"Found {len(vllm_models)} vLLM model(s).\n")
 
     failed = []
     for name, cfg in vllm_models:
         model_id = cfg.get("model_id", "")
-        model_path = cfg.get("model_path", "")
-        if not model_id or not model_path:
-            print(f"[{name}] Missing model_id or model_path — skipping")
+        if not model_id:
+            print(f"[{name}] Missing model_id — skipping\n")
             continue
 
-        print(f"[{name}]")
-        if not download_model(model_id, model_path):
+        print(f"[{name}]  model_id={model_id}")
+        if not download_model(model_id):
             failed.append(name)
         print()
 
@@ -88,7 +75,7 @@ def main():
         print(f"FAILED: {', '.join(failed)}")
         sys.exit(1)
     else:
-        print("All models ready.")
+        print("All models cached.")
 
 
 if __name__ == "__main__":

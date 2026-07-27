@@ -251,28 +251,43 @@ def call_openai(prompt: str, api_key: str, base_url: str,
 _vllm_cache: dict = {}  # model_name -> LLM instance
 
 
+def _resolve_model_source(model_name: str, model_path: str, model_id: str) -> str:
+    """Resolve where to load the model from.
+
+    Priority:
+    1. model_path — if set and the directory exists, use it directly
+    2. ModelScope cache at ~/.cache/modelscope/hub/<model_id>
+    3. model_id — let vLLM fetch from ModelScope (VLLM_USE_MODELSCOPE=True)
+    """
+    if model_path and os.path.isdir(model_path):
+        return model_path
+
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "modelscope", "hub")
+    if model_id:
+        cached = os.path.join(cache_dir, model_id.replace("/", "___"))
+        if os.path.isdir(cached):
+            return cached
+
+    # Fall back: let vLLM/ModelScope handle download at load time
+    return model_id or model_path
+
+
 def _get_vllm_model(model_name: str, model_path: str, model_id: str):
     """Get or create a cached vLLM model instance.
 
-    Uses model_path (local cache) if it exists on disk, otherwise falls back
-    to model_id (fetched from ModelScope when VLLM_USE_MODELSCOPE=True).
     Models are lazy-loaded on first use and kept in memory.
+    Subsequent calls for the same model return the cached instance.
     """
     if model_name not in _vllm_cache:
         import gc
         import torch
         from vllm import LLM
 
-        # Free memory before loading a new model
         gc.collect()
         torch.cuda.empty_cache()
 
-        # Prefer local cache path; fall back to ModelScope model ID
-        model_source = model_path if model_path and os.path.isdir(model_path) else model_id
-        if model_path and os.path.isdir(model_path):
-            print(f"[vLLM] Loading {model_name} from local cache: {model_path}")
-        else:
-            print(f"[vLLM] Loading {model_name} from ModelScope: {model_id}")
+        model_source = _resolve_model_source(model_name, model_path, model_id)
+        print(f"[vLLM] Loading {model_name} from: {model_source}")
 
         _vllm_cache[model_name] = LLM(
             model=model_source,
