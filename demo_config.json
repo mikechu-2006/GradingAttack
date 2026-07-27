@@ -1,0 +1,33 @@
+{
+  "models": {
+    "deepseek-chat": {
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "base_url": "https://api.deepseek.com/v1"
+    },
+    "Llama-3.1-8B-Instruct": {
+      "api_key_env": "LOCAL_LLM_API_KEY",
+      "base_url": "http://localhost:8000/v1"
+    },
+    "Qwen2.5-7B-Instruct": {
+      "api_key_env": "LOCAL_LLM_API_KEY",
+      "base_url": "http://localhost:8000/v1"
+    },
+    "Mistral-7B-Instruct": {
+      "api_key_env": "LOCAL_LLM_API_KEY",
+      "base_url": "http://localhost:8000/v1"
+    },
+    "Qwen3-4B-Instruct-2507": {
+      "api_key_env": "LOCAL_LLM_API_KEY",
+      "base_url": "http://localhost:8000/v1"
+    },
+    "Qwen3.5-4B": {
+      "api_key_env": "LOCAL_LLM_API_KEY",
+      "base_url": "http://localhost:8000/v1"
+    }
+  },
+  "defaults": {
+    "temperature": 0.01,
+    "max_tokens": 16,
+    "nclass": 2
+  }
+}

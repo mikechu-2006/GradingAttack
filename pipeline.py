@@ -398,16 +398,22 @@ class GradingDefensePipeline:
                             # evaluation must grade with the full ASAG prompt,
                             # including the reference solution.
                             t_start = _sbtime.perf_counter()
-                            success_suffix_index = None
-                            success_suffix = None
+                            # Track best suffix across ALL bank entries
+                            best_suffix_idx = None
+                            best_suffix = None
+                            best_resp = None
+                            best_score = float("-inf")       # for correct-producing
+                            best_overall_score = float("-inf")  # fallback
+                            best_overall_idx = None
+                            best_overall_suffix = None
+                            best_overall_resp = None
                             promotion_suffix_index = None
                             promotion_suffix = None
-                            best_suffix_index = None
-                            best_suffix = None
+                            success_suffix_index = None
+                            success_suffix = None
                             suffixes_tried = 0
                             insert_pos_sb = p.rfind(end_tag)
                             original_grade_for_bank = _parse_grade(orig_resp, config.nclass)
-                            best_grade_for_bank = original_grade_for_bank
 
                             for s_idx, s in enumerate(bank):
                                 suffixes_tried += 1
@@ -416,21 +422,20 @@ class GradingDefensePipeline:
                                 else:
                                     test_content = p + s
 
-                                test_resp = self._generate(
-                                    [{"role": "user", "content": test_content}]
+                                test_resp, avg_log_prob = self._generate(
+                                    [{"role": "user", "content": test_content}],
+                                    return_scores=True,
                                 )
                                 test_grade = _parse_grade(test_resp, config.nclass)
 
-                                if (test_grade is not None
-                                        and (best_grade_for_bank is None
-                                             or test_grade < best_grade_for_bank)):
-                                    best_grade_for_bank = test_grade
-                                    best_suffix_index = s_idx
-                                    best_suffix = s
-                                    resp = test_resp
-                                    suffix = s
-                                    msgs[0]["content"] = test_content
+                                # Update overall best (fallback when no suffix flips)
+                                if avg_log_prob > best_overall_score:
+                                    best_overall_score = avg_log_prob
+                                    best_overall_idx = s_idx
+                                    best_overall_suffix = s
+                                    best_overall_resp = test_resp
 
+                                # Track first promotion (grade reduced but not flipped)
                                 if (original_grade_for_bank is not None
                                         and test_grade is not None
                                         and test_grade < original_grade_for_bank
@@ -438,18 +443,45 @@ class GradingDefensePipeline:
                                     promotion_suffix_index = s_idx
                                     promotion_suffix = s
 
-                                if test_grade == 0:  # 0 = correct
-                                    success_suffix_index = s_idx
-                                    success_suffix = s
-                                    break
+                                # Track best correct-producing suffix by confidence
+                                if test_grade == 0 and avg_log_prob > best_score:
+                                    best_score = avg_log_prob
+                                    best_suffix_idx = s_idx
+                                    best_suffix = s
+                                    best_resp = test_resp
+
+                            # Select the best suffix
+                            if best_suffix_idx is not None:
+                                # At least one suffix flipped to correct — use the
+                                # most confident one.
+                                resp = best_resp
+                                suffix = best_suffix
+                                success_suffix_index = best_suffix_idx
+                                success_suffix = best_suffix
+                                best_suffix_index = best_suffix_idx
+                                full_insert_pos = p.rfind(end_tag)
+                                if full_insert_pos != -1:
+                                    msgs[0]["content"] = p[:full_insert_pos] + suffix + end_tag
+                                else:
+                                    msgs[0]["content"] = p + suffix
+                            elif best_overall_idx is not None:
+                                # No suffix flipped — use the most confident overall.
+                                resp = best_overall_resp
+                                suffix = best_overall_suffix
+                                best_suffix_index = best_overall_idx
+                                full_insert_pos = p.rfind(end_tag)
+                                if full_insert_pos != -1:
+                                    msgs[0]["content"] = p[:full_insert_pos] + suffix + end_tag
+                                else:
+                                    msgs[0]["content"] = p + suffix
 
                             t_end = _sbtime.perf_counter()
                             print(
                                 f"[SuffixBank] Tried {suffixes_tried}/{len(bank)} suffixes "
                                 f"in {t_end - t_start:.1f}s, "
                                 f"success_idx={success_suffix_index}, "
-                                f"promotion_idx={promotion_suffix_index}, "
-                                f"best_idx={best_suffix_index}",
+                                f"best_score={best_score if best_suffix_idx is not None else 'N/A'}, "
+                                f"promotion_idx={promotion_suffix_index}",
                                 flush=True,
                             )
 
@@ -981,7 +1013,15 @@ class GradingDefensePipeline:
             print(f"[ATTENTION] Experiment metadata saved to {txt_path}", flush=True)
             logger.info(f"Experiment metadata saved to {txt_path}")
 
-    def _generate(self, messages: list) -> str:
+    def _generate(self, messages: list, return_scores: bool = False):
+        """Generate a response from the model.
+
+        Args:
+            messages: Chat messages.
+            return_scores: If True, returns (response_text, avg_log_prob).
+                           avg_log_prob is the mean log-probability per generated
+                           token — a length-normalized confidence score.
+        """
         inputs = self.tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, return_tensors="pt"
         ).to(self.device)
@@ -1000,21 +1040,48 @@ class GradingDefensePipeline:
             print(f"[DEBUG] tokenized prompt length = {inputs.shape[1]} tokens", flush=True)
 
         print(f"[pipeline] Generating {self.config.generation_config.max_tokens} tokens on {self.device}...", flush=True)
-        outputs = self.model.generate(
-            inputs,
+        gen_kwargs = dict(
             do_sample=False,
             max_new_tokens=self.config.generation_config.max_tokens,
             temperature=self.config.generation_config.temperature,
         )
-        response_text = self.tokenizer.batch_decode(
-            outputs[:, inputs.shape[1]:], skip_special_tokens=True
-        )[0]
-        print(f"[pipeline] Done. Generated {outputs.shape[1] - inputs.shape[1]} tokens.", flush=True)
+        if return_scores:
+            gen_kwargs.update(output_scores=True, return_dict_in_generate=True)
+
+        outputs = self.model.generate(inputs, **gen_kwargs)
+
+        if return_scores:
+            sequences = outputs.sequences
+            scores = outputs.scores
+            generated_ids = sequences[:, inputs.shape[1]:]
+            response_text = self.tokenizer.batch_decode(
+                generated_ids, skip_special_tokens=True
+            )[0]
+            # compute_transition_scores returns log-prob of each generated token
+            with torch.no_grad():
+                transition_scores = self.model.compute_transition_scores(
+                    sequences, scores, normalize_logits=True,
+                )
+            # transition_scores shape: (batch_size, num_generated_tokens)
+            avg_log_prob = transition_scores.mean().item()
+            num_tokens = generated_ids.shape[1]
+            print(
+                f"[pipeline] Done. Generated {num_tokens} tokens, "
+                f"avg_log_prob={avg_log_prob:.4f}.",
+                flush=True,
+            )
+        else:
+            response_text = self.tokenizer.batch_decode(
+                outputs[:, inputs.shape[1]:], skip_special_tokens=True
+            )[0]
+            print(f"[pipeline] Done. Generated {outputs.shape[1] - inputs.shape[1]} tokens.", flush=True)
 
         if self.config.debug:
             print(f"[DEBUG] response = {__import__('json').dumps(response_text, indent=2, ensure_ascii=False)}", flush=True)
             print(f"{'='*60}", flush=True)
 
+        if return_scores:
+            return response_text, avg_log_prob
         return response_text
 
     def _generate_with_voting(self, messages: list) -> str:
