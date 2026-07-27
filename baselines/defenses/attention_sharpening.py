@@ -8,15 +8,37 @@ import torch.nn.functional as F
 from .base import BaseDefense
 
 
+def _get_decoder_layers(model):
+    candidates = [
+        ("model", "layers"),
+        ("language_model", "model", "layers"),
+        ("model", "language_model", "layers"),
+        ("model", "language_model", "model", "layers"),
+    ]
+    for path in candidates:
+        obj = model
+        for attr in path:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if obj is not None:
+            return obj
+    raise ValueError("AttentionSharpening expects a model with decoder layers")
+
+
+def _get_attention_module(layer):
+    for attr in ("self_attn", "linear_attn"):
+        attn = getattr(layer, attr, None)
+        if attn is not None:
+            return attn
+    raise ValueError("AttentionSharpening expects decoder layers with an attention module")
+
+
 class AttentionSharpening(BaseDefense):
-    """推理期 sharpen attention 分布，缓解 Attention Slipping。
+    """Sharpen attention distributions during defended inference.
 
-    对应论文:
-    - Hu et al. (2025) "Attention Slipping: A Mechanistic Understanding of
-      Jailbreak Attacks and Defenses in LLMs"
-
-    原理: 在 attention softmax 前对 logits 除以 T (T < 1)，使模型更聚焦
-    输入中的 unsafe prototype / 核心 grading 内容。
+    This migrates the RolePlay AS defense to the shared defense interface so it
+    can also be used by GCG pipeline configs.
     """
 
     def __init__(
@@ -36,21 +58,18 @@ class AttentionSharpening(BaseDefense):
         return True
 
     def install_model_hooks(self, model) -> list:
-        if not hasattr(model, "model") or not hasattr(model.model, "layers"):
-            raise ValueError("AttentionSharpening expects a causal LM with model.layers")
+        layers = _get_decoder_layers(model)
 
         removers = []
-        target_layers = self._resolve_layer_indices(model)
-        for layer_idx in target_layers:
-            attn = model.model.layers[layer_idx].self_attn
+        for layer_idx in self._resolve_layer_indices(model):
+            attn = _get_attention_module(layers[layer_idx])
             original_forward = attn.forward
             attn.forward = _make_sharpened_forward(original_forward, self.temperature)
             removers.append(lambda attn=attn, orig=original_forward: setattr(attn, "forward", orig))
-
         return removers
 
     def _resolve_layer_indices(self, model) -> List[int]:
-        num_layers = len(model.model.layers)
+        num_layers = len(_get_decoder_layers(model))
         if self.layers == "all":
             return list(range(num_layers))
         if isinstance(self.layers, list):
@@ -60,14 +79,13 @@ class AttentionSharpening(BaseDefense):
 
 @contextmanager
 def _sharpened_softmax_context(temperature: float):
-    """Temporarily scale 4D attention logits before softmax."""
-    orig_F_softmax = F.softmax
+    orig_f_softmax = F.softmax
     orig_torch_softmax = torch.softmax
 
     def _scale(input, dim=None, dtype=None, **kw):
         if isinstance(input, torch.Tensor) and input.dim() == 4:
             input = input / temperature
-        return orig_F_softmax(input, dim=dim, dtype=dtype, **kw)
+        return orig_f_softmax(input, dim=dim, dtype=dtype, **kw)
 
     def _scale_torch(input, dim=None, dtype=None, **kw):
         if isinstance(input, torch.Tensor) and input.dim() == 4:
@@ -79,7 +97,7 @@ def _sharpened_softmax_context(temperature: float):
     try:
         yield
     finally:
-        F.softmax = orig_F_softmax
+        F.softmax = orig_f_softmax
         torch.softmax = orig_torch_softmax
 
 

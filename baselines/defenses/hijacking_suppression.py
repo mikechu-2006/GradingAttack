@@ -8,15 +8,37 @@ import torch.nn.functional as F
 from .base import BaseDefense
 
 
+def _get_decoder_layers(model):
+    candidates = [
+        ("model", "layers"),
+        ("language_model", "model", "layers"),
+        ("model", "language_model", "layers"),
+        ("model", "language_model", "model", "layers"),
+    ]
+    for path in candidates:
+        obj = model
+        for attr in path:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if obj is not None:
+            return obj
+    raise ValueError("HijackingSuppression expects a model with decoder layers")
+
+
+def _get_attention_module(layer):
+    for attr in ("self_attn", "linear_attn"):
+        attn = getattr(layer, attr, None)
+        if attn is not None:
+            return attn
+    raise ValueError("HijackingSuppression expects decoder layers with an attention module")
+
+
 class HijackingSuppression(BaseDefense):
-    """推理期抑制 suffix→context 的高 dominance attention（Attention Hijacking）。
+    """Suppress suffix-dominant attention during defended inference.
 
-    对应论文:
-    - Ben-Tov et al. (2025) "Universal Jailbreak Suffixes Are Strong Attention Hijackers"
-
-    原理: RolePlay / GCG suffix 通过劫持 attention 影响生成。在 softmax 之后
-    对 suffix 区域及 top hijacker keys 的 attention 权重乘以 beta (<1)，
-    再重新归一化，等价于论文中的 Hijacking Suppression。
+    The suffix length is set per sample before hooks are installed, which lets
+    the same HS defense work for RolePlay prompts and optimized GCG suffixes.
     """
 
     def __init__(
@@ -47,7 +69,7 @@ class HijackingSuppression(BaseDefense):
         prompt_content: str,
         attack_suffix: str = "",
     ) -> None:
-        del prompt_content  # reserved for future suffix alignment in full prompt
+        del prompt_content
         if not attack_suffix:
             self._suffix_token_len = 0
             return
@@ -56,10 +78,7 @@ class HijackingSuppression(BaseDefense):
         )
 
     def install_model_hooks(self, model) -> list:
-        if not hasattr(model, "model") or not hasattr(model.model, "layers"):
-            raise ValueError(
-                "HijackingSuppression expects a causal LM with model.layers"
-            )
+        layers = _get_decoder_layers(model)
 
         state = _SuppressionState(
             suffix_token_len=self._suffix_token_len,
@@ -67,18 +86,15 @@ class HijackingSuppression(BaseDefense):
             top_fraction=self.top_fraction,
         )
         removers = []
-        target_layers = self._resolve_layer_indices(model)
-        for layer_idx in target_layers:
-            attn = model.model.layers[layer_idx].self_attn
+        for layer_idx in self._resolve_layer_indices(model):
+            attn = _get_attention_module(layers[layer_idx])
             original_forward = attn.forward
             attn.forward = _make_suppression_forward(original_forward, state)
-            removers.append(
-                lambda attn=attn, orig=original_forward: setattr(attn, "forward", orig)
-            )
+            removers.append(lambda attn=attn, orig=original_forward: setattr(attn, "forward", orig))
         return removers
 
     def _resolve_layer_indices(self, model) -> List[int]:
-        num_layers = len(model.model.layers)
+        num_layers = len(_get_decoder_layers(model))
         if self.layers == "all":
             return list(range(num_layers))
         if isinstance(self.layers, list):
@@ -99,42 +115,40 @@ def _apply_hijacking_suppression(
     beta: float,
     top_fraction: float,
 ) -> torch.Tensor:
-    """Down-weight hijacker attention and renormalize."""
     if attn_weights.dim() != 4:
         return attn_weights
 
-    w = attn_weights
+    weights = attn_weights
     if suffix_token_len > 0:
-        k_len = w.size(-1)
-        suffix_start = max(0, k_len - suffix_token_len)
-        w = w.clone()
-        w[..., suffix_start:] = w[..., suffix_start:] * beta
+        key_len = weights.size(-1)
+        suffix_start = max(0, key_len - suffix_token_len)
+        weights = weights.clone()
+        weights[..., suffix_start:] = weights[..., suffix_start:] * beta
 
-    if top_fraction > 0 and w.size(-2) > 0:
-        w = w.clone() if w is attn_weights else w
-        last_q = w[..., -1, :]
+    if top_fraction > 0 and weights.size(-2) > 0:
+        weights = weights.clone() if weights is attn_weights else weights
+        last_q = weights[..., -1, :]
         flat = last_q.reshape(-1)
         n_top = max(1, int(flat.numel() * top_fraction))
-        thresh = torch.topk(flat, n_top).values.min()
-        hijack_mask = last_q >= thresh
-        w[..., -1, :] = torch.where(
+        threshold = torch.topk(flat, n_top).values.min()
+        hijack_mask = last_q >= threshold
+        weights[..., -1, :] = torch.where(
             hijack_mask,
-            w[..., -1, :] * beta,
-            w[..., -1, :],
+            weights[..., -1, :] * beta,
+            weights[..., -1, :],
         )
 
-    w = w / w.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-    return w.to(attn_weights.dtype)
+    weights = weights / weights.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+    return weights.to(attn_weights.dtype)
 
 
 @contextmanager
 def _suppression_softmax_context(state: _SuppressionState):
-    """Patch softmax to apply hijacking suppression on 4D attention weights."""
-    orig_F_softmax = F.softmax
+    orig_f_softmax = F.softmax
     orig_torch_softmax = torch.softmax
 
     def _patch(input, dim=None, dtype=None, **kw):
-        weights = orig_F_softmax(input, dim=dim, dtype=dtype, **kw)
+        weights = orig_f_softmax(input, dim=dim, dtype=dtype, **kw)
         if isinstance(weights, torch.Tensor) and weights.dim() == 4:
             if state.suffix_token_len > 0 or state.top_fraction > 0:
                 weights = _apply_hijacking_suppression(
@@ -162,7 +176,7 @@ def _suppression_softmax_context(state: _SuppressionState):
     try:
         yield
     finally:
-        F.softmax = orig_F_softmax
+        F.softmax = orig_f_softmax
         torch.softmax = orig_torch_softmax
 
 
