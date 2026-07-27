@@ -1,0 +1,33 @@
+============================================================
+[RUN_CONFIG] Experiment metadata
+============================================================
+  name:          scientsbank-2c-dc-as-full
+  attack_method: Injection
+  model:         Llama-3.1-8B-Instruct
+  model_path:    (auto-download)
+  model_id:      LLM-Research/Meta-Llama-3.1-8B-Instruct
+  template:      ci
+  nclass:        2
+  log_attention: True
+
+  [generation]
+    temperature:   0.01
+    max_tokens:    1024
+
+  [data #1]
+    name:          scientsbank
+    path:          ./dataset/scientsbank.jsonl
+    max_samples:   50
+    random_seed:   42
+
+  [defense #1]
+    type:          attention_sharpening
+    temperature: 0.6
+    layers: [28, 29, 30, 31]
+
+  [defense_runtime]
+    sharpen_clean: True
+    sharpen_attacked: True
+    attn_implementation: eager
+
+============================================================

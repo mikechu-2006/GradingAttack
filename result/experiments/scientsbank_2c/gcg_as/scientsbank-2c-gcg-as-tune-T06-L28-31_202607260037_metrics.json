@@ -1,0 +1,75 @@
+{
+  "nclass": 2,
+  "qwk_clean": 0.19999999999999996,
+  "qwk_attack": -0.6000000000000001,
+  "qwk_defense_clean": 0.4,
+  "qwk_defense_attack": 0.0,
+  "cm_clean": [
+    [
+      2,
+      3
+    ],
+    [
+      1,
+      4
+    ]
+  ],
+  "cm_attack": [
+    [
+      2,
+      3
+    ],
+    [
+      5,
+      0
+    ]
+  ],
+  "cm_defense_clean": [
+    [
+      3,
+      2
+    ],
+    [
+      1,
+      4
+    ]
+  ],
+  "cm_defense_attack": [
+    [
+      0,
+      0
+    ],
+    [
+      5,
+      0
+    ]
+  ],
+  "asr": 1.0,
+  "asr_defended": 1.0,
+  "cas": 3183.0988777534017,
+  "cas_defended": 3183.0988777534017,
+  "total": 10,
+  "total_correct": 5,
+  "total_incorrect": 5,
+  "total_attack_eligible": 4,
+  "total_defense_eligible": 4,
+  "config": {
+    "name": "scientsbank-2c-gcg-as-tune-T06-L28-31",
+    "attack_method": "gcg_suffix_bank",
+    "model": "Llama-3.1-8B-Instruct",
+    "model_path": null,
+    "template": "ci",
+    "datasets": [
+      "scientsbank"
+    ],
+    "defenses": [
+      "AttentionSharpening"
+    ],
+    "nclass": 2,
+    "params": {
+      "bank_path": "result_from_hpc_gcg_suffix_bank/gcg_suffix_bank_2c_his.jsonl",
+      "bank_limit": null,
+      "exclude_bank_source_indices": true
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "nclass": 2,
+  "qwk_clean": 0.5198603230030554,
+  "qwk_attack": -0.317157712305026,
+  "qwk_defense_clean": 0.48057813911472447,
+  "qwk_defense_attack": 0.0,
+  "cm_clean": [
+    [
+      24,
+      15
+    ],
+    [
+      7,
+      54
+    ]
+  ],
+  "cm_attack": [
+    [
+      24,
+      15
+    ],
+    [
+      61,
+      0
+    ]
+  ],
+  "cm_defense_clean": [
+    [
+      20,
+      19
+    ],
+    [
+      4,
+      57
+    ]
+  ],
+  "cm_defense_attack": [
+    [
+      0,
+      0
+    ],
+    [
+      47,
+      14
+    ]
+  ],
+  "asr": 1.0,
+  "asr_defended": 0.7543859649122807,
+  "cas": 3183.0988777534017,
+  "cas_defended": 2764.6931050739104,
+  "total": 100,
+  "total_correct": 39,
+  "total_incorrect": 61,
+  "total_attack_eligible": 54,
+  "total_defense_eligible": 57,
+  "config": {
+    "name": "scientsbank-2c-gcg-hs-full",
+    "attack_method": "gcg_suffix_bank",
+    "model": "Llama-3.1-8B-Instruct",
+    "model_path": null,
+    "template": "ci",
+    "datasets": [
+      "scientsbank"
+    ],
+    "defenses": [
+      "HijackingSuppression"
+    ],
+    "nclass": 2,
+    "params": {
+      "bank_path": "result_from_hpc_gcg_suffix_bank/gcg_suffix_bank_2c_his.jsonl",
+      "bank_limit": null,
+      "exclude_bank_source_indices": true
+    }
+  }
+}

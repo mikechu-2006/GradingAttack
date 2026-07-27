@@ -1,0 +1,41 @@
+{
+  "phase": "full",
+  "pipeline": "gcg_as",
+  "name": "scientsbank-2c-gcg-as-full",
+  "temperature": 0.5,
+  "layers_label": "L28-31",
+  "max_samples": 100,
+  "metrics_path": "result/experiments/scientsbank_2c/gcg_as/scientsbank-2c-gcg-as-full_202607270029_metrics.json",
+  "asr": 1.0,
+  "asr_defended": 0.9811320754716981,
+  "qwk_clean": 0.5198603230030554,
+  "qwk_attack": -0.317157712305026,
+  "qwk_defense_clean": 0.5004344048653344,
+  "qwk_defense_attack": 0.0,
+  "qwk_clean_reduction": 0.019425918137720988,
+  "asr_reduction": 0.018867924528301883,
+  "tune_best_ref": {
+    "phase": "tune",
+    "pipeline": "gcg_as",
+    "name": "scientsbank-2c-gcg-as-tune-T05-L28-31",
+    "temperature": 0.5,
+    "layers_label": "L28-31",
+    "layers": [
+      28,
+      29,
+      30,
+      31
+    ],
+    "max_samples": 10,
+    "metrics_path": "result/experiments/scientsbank_2c/gcg_as/scientsbank-2c-gcg-as-tune-T05-L28-31_202607250345_metrics.json",
+    "asr": 0.0,
+    "asr_defended": 0.0,
+    "qwk_clean": 0.27083333333333326,
+    "qwk_attack": 0.120879120879121,
+    "qwk_defense_clean": 0.27083333333333326,
+    "qwk_defense_attack": 0.120879120879121,
+    "qwk_clean_reduction": 0.0,
+    "asr_reduction": 0.0,
+    "score": 0.0
+  }
+}
