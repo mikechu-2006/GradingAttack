@@ -7,7 +7,7 @@
 #SBATCH -t 17:00:00
 
 # Activate conda environment
-source scripts/activate_gradingattack_env.sh
+# source scripts/activate_gradingattack_env.sh
 
 # For DeepSeek API (remote model only)
 # export DEEPSEEK_API_KEY="your-key-here"

@@ -11,6 +11,9 @@ from pathlib import Path
 
 # Use ModelScope as the model source for vLLM on HPC
 os.environ.setdefault("VLLM_USE_MODELSCOPE", "True")
+# Suppress vLLM info/warning noise (pad_token_id, attention_mask, etc.)
+os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import gradio as gr
 

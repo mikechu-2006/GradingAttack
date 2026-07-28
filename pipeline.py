@@ -578,10 +578,18 @@ class GradingDefensePipeline:
                                             defended_attacked_resp or ""
                                         )
                             else:
-                                # Start from defended_prompt if structural defenses ran
-                                # in Step 2b; otherwise build from clean prompt.
+                                # Start from defended_prompt if structural defenses
+                                # ran in Step 2b; otherwise build from clean prompt.
                                 if not self.structural_defenses:
                                     defended_prompt = prompt
+                                else:
+                                    # Structural defenses were configured but may
+                                    # have been skipped (e.g. GT=correct). Re-apply
+                                    # them on the clean prompt so defended_prompt is
+                                    # always defined.
+                                    defended_prompt = prompt
+                                    for d in self.structural_defenses:
+                                        defended_prompt = d.pre_process(defended_prompt)
                                 # Apply runtime pre-processing defenses on top.
                                 for d in self.runtime_defenses:
                                     defended_prompt = d.pre_process(defended_prompt)
