@@ -8,9 +8,8 @@
 #   export DEEPSEEK_API_KEY="your-key-here"   # optional, for deepseek-chat
 #   python demo_app.py
 
-srun --pty \
-    -p emergency_gpua40 \
+srun -p emergency_gpua40 \
     --gres=gpu:1 \
     -n 4 \
-    -t 12:00:00 \
-    bash
+    --time=08:00:00 \
+    --pty bash
