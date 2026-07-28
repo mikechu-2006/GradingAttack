@@ -467,7 +467,8 @@ input, textarea, select, .gr-textbox textarea, .gr-textbox input,
 .gr-radio .label-text, fieldset label {
     color: #e2e8f0 !important;
 }
-.gr-markdown, .gr-markdown p, .gr-markdown li, .prose p, .prose li {
+.gr-markdown, .gr-markdown p, .gr-markdown li, .gr-markdown strong, .gr-markdown em,
+.gr-markdown span, .prose p, .prose li, .prose strong, .prose em, .prose span {
     color: #cbd5e1 !important;
 }
 .gr-markdown h3, .prose h3, h3 {
@@ -480,6 +481,11 @@ input, textarea, select, .gr-textbox textarea, .gr-textbox input,
     color: #cbd5e1 !important;
 }
 .gr-button.gr-variant-secondary {
+    color: #cbd5e1 !important;
+}
+.gr-prose, .gr-prose *, .svelte-1gfkn6j, .svelte-1gfkn6j *,
+.gr-group, .gr-group *, .gr-panel, .gr-panel *,
+[data-testid="markdown"] *, .md-container *, .render * {
     color: #cbd5e1 !important;
 }
 """

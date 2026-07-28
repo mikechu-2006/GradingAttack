@@ -1,0 +1,6 @@
+Model,Release Date,GCG Suffix Bank ASR (%),Injection ASR,GCG+HS ASR,Family
+Mistral-7B-Instruct-v0.3,May 2024,70.8,28.20,32.00,Mistral
+Llama-3.1-8B-Instruct,Jul 2024,100.0,91.36,50,Llama
+Qwen2.5-7B-Instruct,Sep 2024,23.3,2.63,75.4,Qwen
+Qwen3-4B-Instruct-2507,Apr 2025,0.0,0.0,0.0,Qwen
+Qwen3.5-4B,Feb 2026,0.0,4.17,0.0,Qwen
