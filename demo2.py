@@ -608,7 +608,53 @@ h3 {
     margin-top: 2rem;
     padding-bottom: 1rem;
 }
+
+/* ── Dark-mode text readability ── */
+label, .label-text, .block label, .gr-box label, .prose {
+    color: #cbd5e1 !important;
+}
+input, textarea, select, .gr-textbox textarea, .gr-textbox input,
+.gr-dropdown input, .gr-dropdown .selected, [data-testid] {
+    color: #e2e8f0 !important;
+}
+.gr-radio label, .gr-checkbox label, .gr-checkboxgroup label,
+.gr-radio .label-text, fieldset label {
+    color: #e2e8f0 !important;
+}
+.gr-markdown, .gr-markdown p, .gr-markdown li, .prose p, .prose li {
+    color: #cbd5e1 !important;
+}
+.gr-markdown h3, .prose h3, h3 {
+    color: #e2e8f0 !important;
+}
+.gr-markdown code, .prose code {
+    color: #a5b4fc !important;
+}
+.gr-slider .gr-slider-label, .gr-slider input {
+    color: #cbd5e1 !important;
+}
+.gr-button.gr-variant-secondary {
+    color: #cbd5e1 !important;
+}
 """
+
+# ── Auto-fill: question → default student answer ─────────────────────────────
+
+_QUESTION_STUDENT_MAP = {
+    _Q1: _Q1_SA1,
+    _Q2: _Q2_SA1,
+    _Q3: _Q3_SA1,
+    _Q4: _Q4_SA1,
+    _Q5: _Q5_SA1,
+    _Q6: _Q6_SA1,
+}
+
+
+def on_attack_defense_change(question: str):
+    """Auto-fill the student answer cell when attack or defense changes."""
+    answer = _QUESTION_STUDENT_MAP.get(question.strip(), "")
+    return gr.update(value=answer)
+
 
 # ── Gradio event handlers ────────────────────────────────────────────────────
 
@@ -918,6 +964,18 @@ def create_demo():
             on_model_change,
             [model_dd, attack_radio, defense_radio],
             [attack_radio, defense_radio],
+        )
+
+        attack_radio.change(
+            on_attack_defense_change,
+            [question_display],
+            [student_answer],
+        )
+
+        defense_radio.change(
+            on_attack_defense_change,
+            [question_display],
+            [student_answer],
         )
 
         random_btn.click(

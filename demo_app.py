@@ -454,6 +454,34 @@ h3 {
     margin-top: 2rem;
     padding-bottom: 1rem;
 }
+
+/* ── Dark-mode text readability ── */
+label, .label-text, .block label, .gr-box label, .prose {
+    color: #cbd5e1 !important;
+}
+input, textarea, select, .gr-textbox textarea, .gr-textbox input,
+.gr-dropdown input, .gr-dropdown .selected, [data-testid] {
+    color: #e2e8f0 !important;
+}
+.gr-radio label, .gr-checkbox label, .gr-checkboxgroup label,
+.gr-radio .label-text, fieldset label {
+    color: #e2e8f0 !important;
+}
+.gr-markdown, .gr-markdown p, .gr-markdown li, .prose p, .prose li {
+    color: #cbd5e1 !important;
+}
+.gr-markdown h3, .prose h3, h3 {
+    color: #e2e8f0 !important;
+}
+.gr-markdown code, .prose code {
+    color: #a5b4fc !important;
+}
+.gr-slider .gr-slider-label, .gr-slider input {
+    color: #cbd5e1 !important;
+}
+.gr-button.gr-variant-secondary {
+    color: #cbd5e1 !important;
+}
 """
 
 # ── Gradio event handlers ────────────────────────────────────────────────────

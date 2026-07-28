@@ -4,7 +4,7 @@
 #SBATCH -e demo_err_%j.txt
 #SBATCH -n 4
 #SBATCH --gres=gpu:1
-#SBATCH -t 17:00:00
+#SBATCH -t 12:00:00
 
 # Activate conda environment
 # source scripts/activate_gradingattack_env.sh
