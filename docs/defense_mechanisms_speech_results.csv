@@ -1,0 +1,17 @@
+defense,attack,setting,n_samples,nclass,asr,asr_defended,asr_reduction_pct,qwk_clean,qwk_defense_clean,clean_qwk_retention,assessment,source
+Self-Reminder,RolePlay,binary 2-class,300,2,0.0058,0.0000,100.0,0.4158,0.4449,1.070,Effective; preserves clean QWK,result_from_hpc_roleplay_2c/RolePlay-*-self-reminder-2c-300_*_metrics.json
+Self-Reminder,RolePlay,three-class,300,3,0.1775,0.0545,69.3,0.3227,0.3319,1.028,Moderately effective,result_from_hpc_self_reminder/RolePlay-Llama-3.1-8B-Instruct_*_metrics.json
+Self-Reminder,GCG suffix bank,held-out 500 (3-class),500,3,0.9963,0.9549,4.2,0.2562,0.2615,1.021,Minimal effect,result_from_hpc_gcg_ablation/gcg_suffix_bank_defense_paraphrase_heldout500_metrics.json (SelfReminder row in RESULTS.md)
+Paraphrase,RolePlay,binary 2-class,300,2,0.0058,0.0000,100.0,0.4158,0.1734,0.417,ASR removed; large clean-QWK drop,result_from_hpc_roleplay_2c/RolePlay-*-paraphrase-2c-300_*_metrics.json
+Paraphrase,GCG suffix bank,pipeline held-out 500,500,3,1.0000,0.0356,96.4,0.2947,0.2014,0.684,Strong ASR reduction; clean QWK drops,result/gcg_suffix_bank/.../Pipeline-GCG-SuffixBank-Paraphrase-*-heldout500-attention_202607270048_metrics.json
+Paraphrase,GCG suffix bank,ablation held-out 500,500,3,0.9963,0.3677,63.1,0.2562,0.3512,1.371,Strong ASR reduction; clean QWK improves,result_from_hpc_gcg_ablation/gcg_suffix_bank_defense_paraphrase_heldout500_metrics.json
+Hijacking Suppression,GCG suffix bank,binary 2-class full,100,2,1.0000,0.7544,24.6,0.5199,0.4806,0.924,Best mechanistic vs GCG,result/experiments/scientsbank_2c/gcg_hs/grid_search/full_result.json
+Hijacking Suppression,Injection (DC),binary 2-class full,50,2,0.7407,0.5357,27.7,0.5217,0.5133,0.984,Effective,result/experiments/scientsbank_2c/dc_hs/grid_search/full_result.json
+Hijacking Suppression,Injection (AO),binary 2-class full,50,2,1.0000,1.0000,0.0,0.5217,0.5133,0.984,No effect,result/experiments/scientsbank_2c/ao_hs/grid_search/full_result.json
+Hijacking Suppression,Injection (IM),binary 2-class full,50,2,1.0000,1.0000,0.0,0.5217,0.5133,0.984,No effect,result/experiments/scientsbank_2c/im_hs/grid_search/full_result.json
+Hijacking Suppression,RolePlay,exploratory three-class,300,3,0.0059,0.0173,-193.0,0.3136,0.2753,0.878,No ASR improvement,artifacts/hpc/roleplay/hijacking_suppression/runs/RolePlay-*-hijacking-suppression-300_*_metrics.json
+Attention Sharpening,GCG suffix bank,binary 2-class full,100,2,1.0000,0.9811,1.9,0.5199,0.5004,0.963,Minimal effect,result/experiments/scientsbank_2c/gcg_as/grid_search/full_result.json
+Attention Sharpening,Injection (DC),binary 2-class full,50,2,0.7407,0.7778,-5.0,0.5217,0.5690,1.091,Backfires (ASR rises),result/experiments/scientsbank_2c/dc_as/grid_search/full_result.json
+Attention Sharpening,Injection (AO),binary 2-class full,50,2,1.0000,1.0000,0.0,0.5217,0.5690,1.091,No effect,result/experiments/scientsbank_2c/ao_as/grid_search/full_result.json
+Attention Sharpening,Injection (IM),binary 2-class full,50,2,1.0000,1.0000,0.0,0.5217,0.5690,1.091,No effect,result/experiments/scientsbank_2c/im_as/grid_search/full_result.json
+Attention Sharpening,RolePlay,exploratory three-class,300,3,0.1657,0.2156,-30.1,0.3855,0.4063,1.054,ASR increases,RESULTS.md exploratory table
