@@ -1,0 +1,39 @@
+{
+  "models": {
+    "deepseek-chat": {
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "base_url": "https://api.deepseek.com/v1",
+      "backend": "api"
+    },
+    "Llama-3.1-8B-Instruct": {
+      "model_id": "LLM-Research/Meta-Llama-3.1-8B-Instruct",
+      "model_path": "",
+      "backend": "vllm"
+    },
+    "Qwen2.5-7B-Instruct": {
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "model_path": "",
+      "backend": "vllm"
+    },
+    "Mistral-7B-Instruct": {
+      "model_id": "mistralai/Mistral-7B-Instruct-v0.3",
+      "model_path": "",
+      "backend": "vllm"
+    },
+    "Qwen3-4B-Instruct-2507": {
+      "model_id": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "",
+      "backend": "vllm"
+    },
+    "Qwen3.5-4B": {
+      "model_id": "Qwen/Qwen3.5-4B",
+      "model_path": "",
+      "backend": "vllm"
+    }
+  },
+  "defaults": {
+    "temperature": 0.01,
+    "max_tokens": 16,
+    "nclass": 2
+  }
+}
